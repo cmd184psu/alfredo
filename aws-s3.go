@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-type s3credStruct struct {
+type S3credStruct struct {
 	AccessKey  string `json:"accessKey"`
 	Active     bool   `json:"active"`
 	CreateDate int64  `json:"createDate"`
@@ -24,8 +24,8 @@ type s3credStruct struct {
 	Profile    string `json:"profile"`
 }
 
-type s3ClientSession struct {
-	Credentials s3credStruct `json:"s3creds"`
+type S3ClientSession struct {
+	Credentials S3credStruct `json:"s3creds"`
 	Bucket      string
 	Endpoint    string
 	Region      string
@@ -36,7 +36,7 @@ type s3ClientSession struct {
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) SetEndpoint(sep string) s3ClientSession {
+func (this S3ClientSession) SetEndpoint(sep string) S3ClientSession {
 	this.Endpoint = sep
 
 	if !strings.HasPrefix(this.Endpoint, "https://") {
@@ -54,25 +54,25 @@ func (this s3ClientSession) SetEndpoint(sep string) s3ClientSession {
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) SetRegion(r string) s3ClientSession {
+func (this S3ClientSession) SetRegion(r string) S3ClientSession {
 	this.Region = r
 	return this
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) SetVersioning(v bool) s3ClientSession {
+func (this S3ClientSession) SetVersioning(v bool) S3ClientSession {
 	this.Versioning = v
 	return this
 }
 
 //lint:ignore ST1006 no reason
-func (s3c s3ClientSession) KeepBucket() s3ClientSession {
+func (s3c S3ClientSession) KeepBucket() S3ClientSession {
 	s3c.keepBucket = true
 	return s3c
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) EstablishSession() s3ClientSession {
+func (this S3ClientSession) EstablishSession() S3ClientSession {
 	VerbosePrintln("===== establishing S3 Session =========")
 	//this.sess
 	ct := &http.Transport{
@@ -93,13 +93,13 @@ func (this s3ClientSession) EstablishSession() s3ClientSession {
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) SetBucket(b string) s3ClientSession {
+func (this S3ClientSession) SetBucket(b string) S3ClientSession {
 	this.Bucket = b
 	return this
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) RemoveBucket() error {
+func (this S3ClientSession) RemoveBucket() error {
 	if !this.established {
 		this = this.EstablishSession()
 	}
@@ -123,7 +123,7 @@ func (this s3ClientSession) RemoveBucket() error {
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) HeadBucket() (bool, error) {
+func (this S3ClientSession) HeadBucket() (bool, error) {
 	if !this.established {
 		this = this.EstablishSession()
 	}
@@ -141,7 +141,7 @@ func (this s3ClientSession) HeadBucket() (bool, error) {
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) CreateBucket() error {
+func (this S3ClientSession) CreateBucket() error {
 	if !this.established {
 		this = this.EstablishSession()
 	}
@@ -162,12 +162,12 @@ func (this s3ClientSession) CreateBucket() error {
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) Sync(localPath string) error {
+func (this S3ClientSession) Sync(localPath string) error {
 	return this.SyncInner(len(localPath), localPath)
 }
 
 //lint:ignore ST1006 no reason
-func (this s3ClientSession) SyncInner(trimsz int, localPath string) error {
+func (this S3ClientSession) SyncInner(trimsz int, localPath string) error {
 	// Get a list of local files and subdirectories
 	files, err := os.ReadDir(localPath)
 	if err != nil {
@@ -211,7 +211,7 @@ func (this s3ClientSession) SyncInner(trimsz int, localPath string) error {
 	return nil
 }
 
-func (this s3ClientSession) RecursiveBucketDelete() error {
+func (this S3ClientSession) RecursiveBucketDelete() error {
 
 	var err error
 	var b bool
@@ -283,14 +283,14 @@ func (this s3ClientSession) RecursiveBucketDelete() error {
 	return err
 }
 
-func (s3c s3credStruct) CredentialsStanza() string {
+func (s3c S3credStruct) CredentialsStanza() string {
 	return fmt.Sprintf("[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n\n",
 		s3c.Profile,
 		s3c.AccessKey,
 		s3c.SecretKey)
 }
 
-func (s3c s3credStruct) GenerateAWSCLItoString(endpoint string, region string, useSSL bool) string {
+func (s3c S3credStruct) GenerateAWSCLItoString(endpoint string, region string, useSSL bool) string {
 	if strings.HasPrefix(endpoint, "http") {
 		endpoint = endpoint[strings.Index(endpoint, ":")+3:]
 	}

@@ -24,6 +24,7 @@ var verbose bool
 
 func SetVerbose(v bool) {
 	verbose = v
+	os.Setenv("VERBOSE", "1")
 }
 
 // for debugging purposes, a more verbose output to catch attention

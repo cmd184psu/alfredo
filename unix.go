@@ -46,7 +46,10 @@ func Touch(fileName string) error {
 	}
 }
 
-func System3(cmd string) (err error) {
+func System3toCapturedString(s *string, cmd string) error {
+	VerbosePrintln(cmd)
+
+	cmd = strings.ReplaceAll(strings.TrimSpace(cmd), "  ", " ")
 	arglist := strings.Split(cmd, " ")
 	arglist2 := make([]string, 0)
 
@@ -64,15 +67,24 @@ func System3(cmd string) (err error) {
 	}
 
 	for i := 0; i < len(arglist); i++ {
-		fmt.Printf("arg[%d]=%s\n", i, arglist[i])
+		VerbosePrintln(fmt.Sprintf("arg[%d]=%s\n", i, arglist[i]))
 	}
 
 	var b bytes.Buffer
-	err = Popen3(&b,
+	err := Popen3(&b,
 		exec.Command(arglist[0], arglist[1:]...),
 	)
-	io.Copy(os.Stdout, &b)
-	return
+	*s = b.String()
+	return err
+}
+
+func System3(cmd string) error {
+	var s string
+	if err := System3toCapturedString(&s, cmd); err != nil {
+		return err
+	}
+	_, err := io.Copy(os.Stdout, strings.NewReader(s))
+	return err
 }
 
 // was "readlines"
@@ -451,7 +463,7 @@ func DmidecodeProduct() (string, error) {
 	return b.String(), nil
 }
 
-func Copy(src, dst string) (int64, error) {
+func CopyFile(src, dst string) (int64, error) {
 	sourceFileStat, err := os.Stat(src)
 	if err != nil {
 		return 0, err

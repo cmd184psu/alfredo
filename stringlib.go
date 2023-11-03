@@ -47,7 +47,7 @@ func TrueIsYes(b bool) string {
 	return "No"
 }
 
-func Remove(l []string, s string) []string {
+func RemoveTag(l []string, s string) []string {
 	for i := 0; i < len(l); i++ {
 		if s == l[i] {
 			l[i] = l[len(l)-1]
@@ -57,7 +57,7 @@ func Remove(l []string, s string) []string {
 	return l
 }
 
-func Uniq(l []string) []string {
+func UniqTagSet(l []string) []string {
 	var unique []string
 	for _, v := range l {
 		skip := false
@@ -135,4 +135,25 @@ func TrimQuotes(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+func SetStringIfNotSet(v string, d string) string {
+	if len(v) == 0 {
+		return d
+	}
+	return v
+}
+
+func BlankIsNA(s string) string {
+	if len(s) == 0 {
+		return "N/A"
+	}
+	return s
+}
+
+func NotBlankIsMasked(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return "********"
 }

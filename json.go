@@ -52,17 +52,18 @@ func ReadStructFromString(content string, structure interface{}) error {
 
 func ReadStructFromCommand(cli string, structure interface{}) error {
 	var s string
-	var err error
-	if s, err = PopentoString(cli); err != nil {
-		panic(err.Error())
+	if err := System3toCapturedString(&s, cli); err != nil {
+		return err
 	}
+	VerbosePrintln("Alfredo:::ReadStructFromCommand(" + cli + ")")
+	VerbosePrintln("\ts=" + s)
 	return ReadStructFromString(s, &structure)
 }
 
 func ReadStructFromCommandOverSSH(ssh SSHStruct, cli string, structure interface{}) error {
 	var err error
 	ssh.capture = true
-	ssh, err = ssh.SecureRemoteExecution(cli)
+	err = ssh.SecureRemoteExecution(cli)
 	if err != nil {
 		return err
 	}

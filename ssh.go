@@ -3,7 +3,6 @@ package alfredo
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/user"
@@ -27,8 +26,13 @@ type SSHStruct struct {
 	silent    bool
 }
 
-func (this SSHStruct) GetSSHCli() string {
-	return "ssh -i " + this.Key + " " + this.User + "@" + this.Host
+const (
+	mkdir_p_fmt = "mkdir -p %s"
+	chown_r_fmt = "chown -R %d:%d %s"
+)
+
+func (s SSHStruct) GetSSHCli() string {
+	return "ssh -i " + s.Key + " " + s.User + "@" + s.Host
 }
 
 func (this SSHStruct) SecureDownload(remoteFilePath string, localFilePath string) error {
@@ -169,7 +173,7 @@ func (this SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath
 		sigChan <- true
 		errorChan <- e
 	}()
-	go fstools.Spinny(sigChan)
+	go Spinny(sigChan)
 	//errorRec = <-errorChan
 	err = <-errorChan
 	wg.Wait()
@@ -197,7 +201,7 @@ func (this SSHStruct) SecureUploadAndSpin(localFilePath string, remoteFilePath s
 	wg.Wait()
 	return err
 }
-func (this SSHStruct) SetDefaults() SSHStruct {
+func (this *SSHStruct) SetDefaults() {
 	currentUser, err := user.Current()
 	if err != nil {
 		panic("Can't get current user")
@@ -214,15 +218,17 @@ func (this SSHStruct) SetDefaults() SSHStruct {
 	if this.capture {
 		this.body = ""
 	}
-
-	return this
 }
-func (this SSHStruct) SecureRemoteExecution(cli string) (SSHStruct, error) {
-	this = this.SetDefaults()
+func (this *SSHStruct) SecureRemoteExecution(cli string) error {
+	this.SetDefaults()
 	// Replace with your remote server's SSH configuration
+	if len(this.Host) == 0 {
+		//		log.Fatalln("missing host")
+		panic("missing host")
+	}
 
 	// Read the private key
-	keyBytes, err := ioutil.ReadFile(this.Key)
+	keyBytes, err := os.ReadFile(this.Key)
 	if err != nil {
 		log.Fatalf("Failed to read private key: %v", err)
 	}
@@ -240,6 +246,8 @@ func (this SSHStruct) SecureRemoteExecution(cli string) (SSHStruct, error) {
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
+
+	VerbosePrintln(this.GetSSHCli() + " \"" + cli + "\"")
 
 	// Connect to the remote server
 	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", this.Host, this.port), config)
@@ -264,35 +272,21 @@ func (this SSHStruct) SecureRemoteExecution(cli string) (SSHStruct, error) {
 	barray, sessErr := session.CombinedOutput(cli)
 	if sessErr != nil {
 		VerbosePrintln("sessErr: " + sessErr.Error())
-		return this, sessErr
+		return sessErr
 	}
 	this.body = string(barray)
-	//} else {
-	//	panic("WRONG!")
-	// if !this.silent {
-	// 	session.Stdout = os.Stdout
-	// 	session.Stderr = os.Stderr
-	// }
-	// err = session.Run(cli)
-	// fd := int(os.Stdin.Fd())
-	// oldState, err := terminal.MakeRaw(fd)
-	// if err != nil {
-	// 	VerbosePrintln("err: " + err.Error())
-	// 	return this, err
-	// }
-	// defer terminal.Restore(fd, oldState)
-	//}
-	return this, err
+	return err
 }
 
 func (s SSHStruct) GetRemoteHostname() (string, error) {
 	var err error
-	s, err = s.SecureRemoteExecution("hostname -s")
+	err = s.SecureRemoteExecution("hostname -s")
 	if err != nil {
 		return "", err
 	}
 	return strings.Trim(s.body, "\n"), nil
 }
+
 func (this SSHStruct) RemoteExecuteAndSpin(cli string) (SSHStruct, error) {
 	var err error
 	var wg sync.WaitGroup
@@ -307,7 +301,7 @@ func (this SSHStruct) RemoteExecuteAndSpin(cli string) (SSHStruct, error) {
 		var e error
 		this.capture = false
 		this.silent = true
-		this, e = this.SecureRemoteExecution(cli)
+		e = this.SecureRemoteExecution(cli)
 		sigChan <- true
 		errorChan <- e
 	}()
@@ -324,20 +318,66 @@ func (this SSHStruct) UploadCLI(src string, tgt string) string {
 }
 
 // remote, local
-func (this SSHStruct) DownloadCLI(src string, tgt string) string {
-	return fmt.Sprintf("Downloading from %s:%s %s", this.Host, src, tgt)
+func (s SSHStruct) DownloadCLI(src string, tgt string) string {
+	return fmt.Sprintf("Downloading from %s:%s %s", s.Host, src, tgt)
 }
 
 // return false on error or file doesn't exist (easy mode)
 func (s SSHStruct) RemoteFileExists(path string) bool {
-	var err error
-	s, err = s.SecureRemoteExecution("test -e " + path)
-	if err != nil {
-		return false
-	}
-	return true
+	err := s.SecureRemoteExecution("test -e " + path)
+	return err == nil
 }
 
 func (s SSHStruct) BackgroundedRemoteExecute(cli string) (SSHStruct, error) {
-	return s.SecureRemoteExecution("nohup " + cli + " &")
+	err := s.SecureRemoteExecution("nohup " + cli + " &")
+	return s, err
+}
+
+func (s SSHStruct) WithCapture(c bool) SSHStruct {
+	s.capture = c
+	return s
+}
+func (s *SSHStruct) SetCapture(c bool) SSHStruct {
+	s.capture = c
+	return *s
+}
+func (s SSHStruct) WithSilent(c bool) SSHStruct {
+	s.silent = c
+	return s
+}
+func (s SSHStruct) WithKey(k string) SSHStruct {
+	s.Key = k
+	return s
+}
+
+func (s *SSHStruct) SetHost(h string) SSHStruct {
+	s.Host = h
+	return *s
+}
+func (s SSHStruct) WithHost(h string) SSHStruct {
+	s.Host = h
+	return s
+}
+func (s SSHStruct) WithUser(u string) SSHStruct {
+	s.User = u
+	return s
+}
+func (s SSHStruct) WithRemoteDir(rd string) SSHStruct {
+	s.remoteDir = rd
+	return s
+}
+
+func (s SSHStruct) GetBody() string {
+	return s.body
+}
+func (s SSHStruct) GetRemoteDir() string {
+	return s.remoteDir
+}
+
+func (s SSHStruct) MkdirAll(dir string) error {
+	return s.SecureRemoteExecution(fmt.Sprintf(mkdir_p_fmt, dir))
+}
+
+func (s SSHStruct) Chown(uid int, gid int, path string) error {
+	return s.SecureRemoteExecution(fmt.Sprintf(chown_r_fmt, uid, gid, path))
 }
