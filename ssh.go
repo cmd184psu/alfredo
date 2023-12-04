@@ -354,6 +354,10 @@ func (s *SSHStruct) SetHost(h string) SSHStruct {
 	s.Host = h
 	return *s
 }
+func (s *SSHStruct) SetRemoteDir(r string) SSHStruct {
+	s.remoteDir = r
+	return *s
+}
 func (s SSHStruct) WithHost(h string) SSHStruct {
 	s.Host = h
 	return s

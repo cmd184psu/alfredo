@@ -140,6 +140,18 @@ func WriteSliceToFile(filename string, content []string) error {
 }
 
 func WriteStringToFile(filename string, content string) error {
+	f, err := os.OpenFile(filename+".tmp", os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if _, err = f.WriteString(content); err != nil {
+		panic(err)
+	}
+
+	return MoveFile(filename+".tmp", filename)
+}
+func AppendStringToFile(filename string, content string) error {
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
@@ -488,7 +500,10 @@ func CopyFile(src, dst string) (int64, error) {
 	return nBytes, err
 }
 
-func Move(src, dst string) error {
+func MoveFile(src string, dst string) error {
+	if err := RemoveFile(dst); err != nil {
+		return err
+	}
 	return os.Rename(src, dst)
 }
 

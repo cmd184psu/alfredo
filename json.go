@@ -33,6 +33,24 @@ func WriteStructToJSONFile(filePath string, structure interface{}) error {
 	return file.Chmod(0644)
 }
 
+// simply write a data interface to a json file; shamelessly picked off the internet
+func WriteStructToJSONFilePP(filePath string, structure interface{}) error {
+	// file, err := os.Create(filePath)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer file.Close()
+
+	// s := PrettyPrint(structure)
+	// if len(s) == 0 {
+	// 	return errors.New("string was empty on pp")
+	// } else {
+	// 	fmt.Printf("size is %d\n", len(s))
+	// 	fmt.Println(s)
+	// }
+	return WriteStringToFile(filePath, PrettyPrint(structure))
+}
+
 // simply reads JSON data from a file and populates the provided structure.
 func ReadStructFromJSONFile(filePath string, structure interface{}) error {
 	file, err := os.Open(filePath)

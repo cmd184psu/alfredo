@@ -39,7 +39,7 @@ type S3ClientSession struct {
 func (this S3ClientSession) SetEndpoint(sep string) S3ClientSession {
 	this.Endpoint = sep
 
-	if !strings.HasPrefix(this.Endpoint, "https://") {
+	if !strings.HasPrefix(this.Endpoint, "http") {
 		this.Endpoint = "https://" + this.Endpoint
 	}
 
@@ -47,8 +47,12 @@ func (this S3ClientSession) SetEndpoint(sep string) S3ClientSession {
 		dotidx := strings.Index(this.Endpoint, ".")
 		this.Region = this.Endpoint[len("https://s3-"):dotidx]
 		VerbosePrintln("region=" + this.Region)
+	} else if strings.HasPrefix(this.Endpoint, "http://s3-") {
+		dotidx := strings.Index(this.Endpoint, ".")
+		this.Region = this.Endpoint[len("http://s3-"):dotidx]
+		VerbosePrintln("region=" + this.Region)
 	} else {
-		VerbosePrintln("endpoint is missing https://s3-; ep is: " + this.Endpoint)
+		VerbosePrintln("endpoint is missing http[s]://s3-; ep is: " + this.Endpoint)
 	}
 	return this
 }
