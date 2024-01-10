@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 )
 
@@ -96,4 +97,35 @@ func PrettyPrint(v any) string {
 		return "{}"
 	}
 	return string(jsonData)
+}
+
+func PrettyPrintJSONFile(filePath string) {
+	// Replace "your_file.json" with the actual path to your JSON file
+
+	// Read the JSON file into memory
+	jsonData, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		fmt.Println("Error reading JSON file:", err)
+		return
+	}
+
+	// Create a map to store the JSON data
+	var data map[string]interface{}
+
+	// Unmarshal the JSON data into the map
+	err = json.Unmarshal(jsonData, &data)
+	if err != nil {
+		fmt.Println("Error unmarshalling JSON data:", err)
+		return
+	}
+
+	// Pretty print the JSON data
+	prettyJSON, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		fmt.Println("Error pretty printing JSON data:", err)
+		return
+	}
+
+	// Display the pretty-printed JSON on stdout
+	fmt.Println(string(prettyJSON))
 }
