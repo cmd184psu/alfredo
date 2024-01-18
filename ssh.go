@@ -1,6 +1,7 @@
 package alfredo
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -87,6 +88,63 @@ func (this SSHStruct) SecureDownload(remoteFilePath string, localFilePath string
 
 	// Copy the remote file content to the local file
 	_, err = io.Copy(localFile, remoteFile)
+	return err
+}
+
+func (this *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string) error {
+	// Read the private key file
+	keyBytes, err := os.ReadFile(this.Key)
+	if err != nil {
+		return err
+	}
+
+	// Parse the private key
+	privateKey, err := ssh.ParsePrivateKey(keyBytes)
+	if err != nil {
+		return err
+	}
+
+	// Create an SSH client configuration
+	config := &ssh.ClientConfig{
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User:            this.User,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(privateKey),
+		},
+	}
+
+	// Connect to the remote host
+	sshClient, err := ssh.Dial("tcp", this.Host+":22", config)
+	if err != nil {
+		return err
+	}
+	defer sshClient.Close()
+
+	// Create an SFTP session
+	sftpClient, err := sftp.NewClient(sshClient)
+	if err != nil {
+		return err
+	}
+	defer sftpClient.Close()
+
+	// Open the remote file
+	remoteFile, err := sftpClient.Create(remoteFilePath)
+	if err != nil {
+		return err
+	}
+	defer remoteFile.Close()
+
+	w, err := remoteFile.Write(content)
+
+	if err != nil {
+		VerbosePrintln("err=" + err.Error())
+	}
+	if w == 0 {
+		panic("zero bytes were written.. clearly, should not be the case")
+	} else {
+		fmt.Printf("wrote %d bytes\n", w)
+	}
+
 	return err
 }
 
@@ -384,4 +442,91 @@ func (s SSHStruct) MkdirAll(dir string) error {
 
 func (s SSHStruct) Chown(uid int, gid int, path string) error {
 	return s.SecureRemoteExecution(fmt.Sprintf(chown_r_fmt, uid, gid, path))
+}
+
+func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error {
+	// SSH configuration
+	keyBytes, err := os.ReadFile(s.Key)
+	if err != nil {
+		return err
+	}
+
+	VerbosePrintln("parsing key, in memory")
+	// Parse the private key
+	privateKey, err := ssh.ParsePrivateKey(keyBytes)
+	if err != nil {
+		return err
+	}
+
+	VerbosePrintln("creating ssh config")
+	config := &ssh.ClientConfig{
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User:            s.User,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(privateKey),
+		},
+	}
+
+	VerbosePrintln("ssh dial up to " + s.Host + ":22")
+	// Connect to the remote host
+	sshClient, err := ssh.Dial("tcp", s.Host+":22", config)
+	if err != nil {
+		return err
+	}
+	defer sshClient.Close()
+
+	VerbosePrintln("establishing new session")
+	// Open a new session
+	session, err := sshClient.NewSession()
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+
+	// Start the remote command and get pipes for its stdin and stdout
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return err
+	}
+	defer stdin.Close()
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	//defer stdout.Close()
+
+	// Run the remote command
+	err = session.Start(cli)
+	if err != nil {
+		return err
+	}
+
+	// Write the []byte to the standard input of the remote command
+	_, err = stdin.Write(content)
+	if err != nil {
+		return err
+	}
+
+	// Close the standard input of the remote command
+	stdin.Close()
+
+	// Read the output of the remote command
+	var outputBuffer bytes.Buffer
+	_, err = io.Copy(&outputBuffer, stdout)
+	if err != nil {
+		return err
+	}
+
+	// Wait for the remote command to finish
+	err = session.Wait()
+	if err != nil {
+		return err
+	}
+
+	// Print the output
+	//fmt.Println("Remote command output:", outputBuffer.String())
+	VerbosePrintln("acquire body from session")
+	s.body = outputBuffer.String()
+	return nil
 }

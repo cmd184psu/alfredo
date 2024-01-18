@@ -62,8 +62,11 @@ func TestExecutiveOverSSH(t *testing.T) {
 	var ssh SSHStruct
 
 	ssh.SetDefaults()
-	ReadStructFromJSONFile("./ssh.json", &ssh)
 
+	ReadStructFromJSONFile("./ssh.json", &ssh)
+	if ssh.Key[0] == '~' {
+		ssh.Key = os.Getenv("HOME") + ssh.Key[1:]
+	}
 	fmt.Println(PrettyPrint(ssh))
 
 	var exe ExecStruct
