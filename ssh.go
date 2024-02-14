@@ -282,7 +282,7 @@ func (this *SSHStruct) SecureRemoteExecution(cli string) error {
 	// Replace with your remote server's SSH configuration
 	if len(this.Host) == 0 {
 		//		log.Fatalln("missing host")
-		panic("missing host")
+		panic("SecureRemoteExecution::missing host")
 	}
 
 	// Read the private key
@@ -445,6 +445,7 @@ func (s SSHStruct) Chown(uid int, gid int, path string) error {
 }
 
 func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error {
+	VerbosePrintln("!!! SecureRemotePipeExecutetion(...) !!!")
 	// SSH configuration
 	keyBytes, err := os.ReadFile(s.Key)
 	if err != nil {
@@ -529,4 +530,8 @@ func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error 
 	VerbosePrintln("acquire body from session")
 	s.body = outputBuffer.String()
 	return nil
+}
+
+func (s SSHStruct) NotConfigured() bool {
+	return len(s.Key) == 0 || len(s.Host) == 0 || len(s.User) == 0
 }

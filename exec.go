@@ -99,6 +99,9 @@ func (ex ExecStruct) OkToWatch() bool {
 	return ex.watcherExecFunc != nil
 }
 
+func (ex ExecStruct) GetBody() string {
+	return ex.body
+}
 func (ex *ExecStruct) Execute() error {
 	VerbosePrintln("Execute:: begin")
 	var err error

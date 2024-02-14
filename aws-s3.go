@@ -314,3 +314,45 @@ func (s3c S3credStruct) GenerateAWSCLItoString(endpoint string, region string, u
 		fmt.Sprintln("alias cs3='aws s3 $AWSOPTS 2>/dev/null'") +
 		fmt.Sprintln("alias cs3api='aws s3api $AWSOPTS 2>/dev/null'")
 }
+
+func (s3s S3ClientSession) ListBuckets() []string {
+	ct := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	awsConfig := aws.NewConfig().
+		WithEndpoint(s3s.Endpoint).
+		WithCredentials(credentials.NewStaticCredentials(s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, "")).
+		WithS3ForcePathStyle(true).
+		WithRegion(s3s.Region).
+		WithHTTPClient(&http.Client{Transport: ct})
+
+	sess := session.Must(session.NewSession(awsConfig))
+
+	svc := s3.New(sess)
+	input := &s3.ListBucketsInput{}
+
+	result, err := svc.ListBuckets(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				panic(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			panic(err.Error())
+		}
+	}
+
+	var returnVal []string
+	if err != nil {
+		panic(err.Error())
+	}
+
+	for _, bucket := range result.Buckets {
+		returnVal = append(returnVal, *bucket.Name)
+	}
+	return returnVal
+}
