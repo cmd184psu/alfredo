@@ -356,3 +356,68 @@ func (s3s S3ClientSession) ListBuckets() []string {
 	}
 	return returnVal
 }
+
+func S3HelperScript(profile string, region string, endpoint string) string {
+	var scriptLine []string
+	scriptLine = append(scriptLine, "#!/usr/bin/env bash")
+	scriptLine = append(scriptLine, "export S3_ENDPOINT="+endpoint)
+	scriptLine = append(scriptLine, "export AWS_OPTS=\" --endpoint-url="+endpoint+" --profile "+profile+" --region "+region+"\"")
+	scriptLine = append(scriptLine, "export S3API=0")
+	scriptLine = append(scriptLine, "if [ \"$1\" == \"s3api\" ];	then")
+	scriptLine = append(scriptLine, "\tshift")
+	scriptLine = append(scriptLine, "\texport S3API=1")
+	scriptLine = append(scriptLine, "fi")
+	scriptLine = append(scriptLine, "if [ $S3API -eq	1 ]; then")
+	scriptLine = append(scriptLine, "\taws $AWS_OPTS s3api $@")
+	scriptLine = append(scriptLine, "else")
+	scriptLine = append(scriptLine, "\taws $AWS_OPTS s3 $@")
+	scriptLine = append(scriptLine, "fi")
+	return strings.Join(scriptLine, "\n")
+}
+
+func (s3s S3ClientSession) IsVersioningEnabled() bool {
+	if !s3s.established {
+		panic("unexpectedly.. establishing session in IsVersionEnabled()")
+		//s3s = s3s.EstablishSession()
+	}
+	// _, err := s3s.Client.CreateBucket(&s3.CreateBucketInput{
+	// 	Bucket: aws.String(s3s.Bucket),
+	// })
+
+	if len(s3s.Region) == 0 {
+		panic("whoops.. forgot to set region")
+	}
+	if len(s3s.Endpoint) == 0 {
+		panic("whoops.. forgot to set ep")
+	}
+
+	// Get the versioning status of the S3 bucket
+
+	ct := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	VerbosePrintln(fmt.Sprintf("ak=%q,sk=%q,b=%q", s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Bucket))
+	awsConfig := aws.NewConfig().
+		WithEndpoint(s3s.Endpoint).
+		WithCredentials(credentials.NewStaticCredentials(s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, "")).
+		WithS3ForcePathStyle(true).
+		WithRegion(s3s.Region).
+		WithHTTPClient(&http.Client{Transport: ct})
+
+	sess := session.Must(session.NewSession(awsConfig))
+
+	svc := s3.New(sess)
+	input := &s3.GetBucketVersioningInput{Bucket: aws.String(s3s.Bucket)}
+
+	// s3s.Client.SigningRegion = s3s.Region
+	// VerbosePrintln("endpoint = " + s3s.Endpoint)
+	// s3s.Client.Endpoint = s3s.Endpoint
+	result, err := svc.GetBucketVersioning(input)
+
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Check if versioning is enabled
+	return strings.EqualFold(aws.StringValue(result.Status), "Enabled")
+}
