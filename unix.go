@@ -710,3 +710,10 @@ func RemoveFile(path string) error {
 	}
 	return os.Remove(path)
 }
+
+func MkdirAll(path string) error {
+	if FileExistsEasy(path) {
+		return nil
+	}
+	return os.MkdirAll(path, 0755)
+}

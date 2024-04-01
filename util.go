@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 // the only global variable, Verbose is only used directly by the VerbosePrintln() function
@@ -25,6 +28,9 @@ var verbose bool
 func SetVerbose(v bool) {
 	verbose = v
 	os.Setenv("VERBOSE", "1")
+}
+func GetVerbose() bool {
+	return strings.EqualFold(os.Getenv("VERBOSE"), "1") || verbose
 }
 
 // for debugging purposes, a more verbose output to catch attention
@@ -54,4 +60,47 @@ func LoadFileIntoSlice(f string) ([]string, error) {
 	}
 	// check for the error that occurred during the scanning
 	return returnlist, scanner.Err()
+}
+
+func EatError(s string, e error) string {
+	if e != nil {
+		panic(e.Error())
+	}
+	return s
+}
+
+func YoungestFileTime() string {
+	var youngestTime time.Time
+	//var youngestFile string
+	var count int
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			modTime := info.ModTime()
+			if modTime.After(youngestTime) {
+				youngestTime = modTime
+				fmt.Println("young file found=" + path)
+				//youngestFile = path
+			}
+			count++
+		}
+		return nil
+	})
+
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Printf("Processed %d files.\n", count)
+	timesplit := strings.Split(youngestTime.String(), " ")
+	fmt.Printf("time: %s\n", youngestTime.String())
+	parsedDate, err := time.Parse("2006-01-02", timesplit[0])
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Format the date in the desired output format
+	return parsedDate.Format("02Jan2006")
 }

@@ -135,7 +135,7 @@ func (ex *ExecStruct) Execute() error {
 			VerbosePrintln(ex.ssh.GetSSHCli() + " \"" + ex.mainCli + "\"")
 
 			e = ex.ssh.SecureRemoteExecution(ex.mainCli)
-			ex.body = ex.ssh.body
+			ex.body = ex.ssh.stdout
 		} else {
 			e = ex.mainExecFunc(&ex.body, ex.mainCli)
 			VerbosePrintln("mainExecFunc completed")

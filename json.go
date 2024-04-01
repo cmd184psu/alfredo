@@ -86,7 +86,7 @@ func ReadStructFromCommandOverSSH(ssh SSHStruct, cli string, structure interface
 	if err != nil {
 		return err
 	}
-	return ReadStructFromString(ssh.body, &structure)
+	return ReadStructFromString(ssh.stdout, &structure)
 }
 
 // generate a "prettyprint" output of the structure

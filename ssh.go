@@ -2,12 +2,15 @@ package alfredo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,10 +24,12 @@ type SSHStruct struct {
 	User      string `json:"user"`
 	Host      string `json:"host"`
 	capture   bool
-	body      string
+	stdout    string
+	stderr    string
 	port      int
 	remoteDir string
 	silent    bool
+	exitCode  int
 }
 
 const (
@@ -75,6 +80,7 @@ func (this SSHStruct) SecureDownload(remoteFilePath string, localFilePath string
 	// Open the remote file
 	remoteFile, err := sftpClient.Open(remoteFilePath)
 	if err != nil {
+		VerbosePrintln("returning with err: " + err.Error())
 		return err
 	}
 	defer remoteFile.Close()
@@ -82,6 +88,7 @@ func (this SSHStruct) SecureDownload(remoteFilePath string, localFilePath string
 	// Create or truncate the local file
 	localFile, err := os.Create(localFilePath)
 	if err != nil {
+		VerbosePrintln("returning with err: " + err.Error())
 		return err
 	}
 	defer localFile.Close()
@@ -95,12 +102,18 @@ func (this *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string
 	// Read the private key file
 	keyBytes, err := os.ReadFile(this.Key)
 	if err != nil {
+		VerbosePrintln("missing ssh key")
 		return err
 	}
-
+	if !this.RemoteFileExists(remoteFilePath) {
+		if err := this.SecureRemoteExecution("touch " + remoteFilePath); err != nil {
+			return err
+		}
+	}
 	// Parse the private key
 	privateKey, err := ssh.ParsePrivateKey(keyBytes)
 	if err != nil {
+		VerbosePrintln("ssh parse error")
 		return err
 	}
 
@@ -127,9 +140,12 @@ func (this *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string
 	}
 	defer sftpClient.Close()
 
+	VerbosePrintln("creating remote file: " + remoteFilePath)
+
 	// Open the remote file
 	remoteFile, err := sftpClient.Create(remoteFilePath)
 	if err != nil {
+		VerbosePrintln("error creating remote file: " + remoteFilePath)
 		return err
 	}
 	defer remoteFile.Close()
@@ -141,9 +157,10 @@ func (this *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string
 	}
 	if w == 0 {
 		panic("zero bytes were written.. clearly, should not be the case")
-	} else {
-		fmt.Printf("wrote %d bytes\n", w)
 	}
+	// if ! this.silent {
+	// 	fmt.Printf("wrote %d bytes\n", w)
+	// }
 
 	return err
 }
@@ -208,9 +225,10 @@ func (this SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) 
 	}
 	if w == 0 {
 		panic("zero bytes were written.. clearly, should be the case")
-	} else {
-		fmt.Printf("wrote %d bytes\n", w)
 	}
+	// if ! this.silent {
+	// 	fmt.Printf("wrote %d bytes\n", w)
+	// }
 
 	return err
 }
@@ -274,19 +292,27 @@ func (this *SSHStruct) SetDefaults() {
 		this.Key = filepath.Join(currentUser.HomeDir + "/.ssh/id_rsa")
 	}
 	if this.capture {
-		this.body = ""
+		this.stdout = ""
+		this.stderr = ""
 	}
 }
-func (this *SSHStruct) SecureRemoteExecution(cli string) error {
-	this.SetDefaults()
+
+func getExitCode(s string) int {
+	//Process exited with status 2
+	splits := strings.Split(s, " ")
+	e, _ := strconv.Atoi(splits[len(splits)-1])
+	return e
+}
+func (s *SSHStruct) SecureRemoteExecution(cli string) error {
+	s.SetDefaults()
 	// Replace with your remote server's SSH configuration
-	if len(this.Host) == 0 {
+	if len(s.Host) == 0 {
 		//		log.Fatalln("missing host")
 		panic("SecureRemoteExecution::missing host")
 	}
 
 	// Read the private key
-	keyBytes, err := os.ReadFile(this.Key)
+	keyBytes, err := os.ReadFile(s.Key)
 	if err != nil {
 		log.Fatalf("Failed to read private key: %v", err)
 	}
@@ -298,17 +324,17 @@ func (this *SSHStruct) SecureRemoteExecution(cli string) error {
 	}
 
 	config := &ssh.ClientConfig{
-		User: this.User,
+		User: s.User,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	VerbosePrintln(this.GetSSHCli() + " \"" + cli + "\"")
+	VerbosePrintln(s.GetSSHCli() + " \"" + cli + "\"")
 
 	// Connect to the remote server
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", this.Host, this.port), config)
+	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", s.Host, s.port), config)
 	if err != nil {
 		log.Fatalf("Failed to dial: %v", err)
 	}
@@ -316,36 +342,99 @@ func (this *SSHStruct) SecureRemoteExecution(cli string) error {
 
 	// Execute a remote command
 	session, err := conn.NewSession()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	session.Stdout = &stdoutBuf
+	session.Stderr = &stderrBuf
 
-	if len(this.remoteDir) > 0 {
-		cli = "cd " + this.remoteDir + " && " + cli
+	if len(s.remoteDir) > 0 {
+		cli = "cd " + s.remoteDir + " && " + cli
 	}
 	if err != nil {
 		log.Fatalf("Failed to create session: %v", err)
 	}
 	defer session.Close()
 
+	if GetVerbose() {
+		VerbosePrintln("---setting verbose in session ---")
+		cli = "export VERBOSE=1; " + cli
+		session.Setenv("VERBOSE", "1")
+	}
+	// else {
+	// 	fmt.Println("---NOT setting verbose in session ---")
+	// }
+
 	VerbosePrintln("SecureRemoteExecution: " + cli)
 	//if this.capture {
-	barray, sessErr := session.CombinedOutput(cli)
+	sessErr := session.Run(cli)
+	stdoutBytes, _ := io.ReadAll(&stdoutBuf)
+	stderrBytes, _ := io.ReadAll(&stderrBuf)
+
 	if sessErr != nil {
-		VerbosePrintln("sessErr: " + sessErr.Error())
-		return sessErr
+		if !strings.HasPrefix(sessErr.Error(), "Process exited with") {
+			//Process exited with status 2
+			VerbosePrintln("sessErr: " + sessErr.Error())
+			return sessErr
+		}
+		s.exitCode = getExitCode(sessErr.Error())
+	} else {
+		s.exitCode = 0
 	}
-	this.body = string(barray)
-	return err
+	s.stdout = string(stdoutBytes)
+	s.stderr = string(stderrBytes)
+
+	if s.exitCode == 0 {
+		return nil
+	}
+	VerbosePrintln("sessErr: " + sessErr.Error())
+	VerbosePrintln("==== stderr ===")
+	VerbosePrintln(s.stderr)
+	VerbosePrintln("==== stdout ===")
+	VerbosePrintln(s.stdout)
+	return errors.New("ssh process exited with errors")
+}
+func (ssh SSHStruct) RemoteFindFiles(sdirectoryPath string, prefix string, glob string) ([]string, error) {
+	cli := GetFileFindCLI(sdirectoryPath, prefix, glob)
+	var result []string
+	if err := ssh.SecureRemoteExecution(cli); err != nil {
+		return result, err
+	}
+	result = strings.Split(ssh.GetBody(), "\n")
+	return result[:len(result)-1], nil
+}
+
+func (ssh SSHStruct) RemoteRemoveFiles(sdirectoryPath string, prefix string, glob string) error {
+	files, err := ssh.RemoteFindFiles(sdirectoryPath, prefix, glob)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(files); i++ {
+		if strings.EqualFold(strings.TrimSpace(files[i]), "") {
+			return errors.New("blank file in list")
+		}
+		VerbosePrintln(fmt.Sprintf("removing file %s from host %s", files[i], ssh.Host))
+		if err := ssh.RemoveRemoteFile(files[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (ssh SSHStruct) RenameRemoteFile(oldfile string, newfile string) error {
+	return ssh.SecureRemoteExecution(fmt.Sprintf("mv -v %s %s", oldfile, newfile))
+}
+
+func (ssh SSHStruct) RemoveRemoteFile(file string) error {
+	return ssh.SecureRemoteExecution(fmt.Sprintf("rm -vf %s", file))
 }
 
 func (s SSHStruct) GetRemoteHostname() (string, error) {
-	var err error
-	err = s.SecureRemoteExecution("hostname -s")
-	if err != nil {
+	if err := s.SecureRemoteExecution("hostname -s"); err != nil {
 		return "", err
 	}
-	return strings.Trim(s.body, "\n"), nil
+	return strings.Trim(s.stdout, "\n"), nil
 }
 
-func (this SSHStruct) RemoteExecuteAndSpin(cli string) (SSHStruct, error) {
+func (s *SSHStruct) RemoteExecuteAndSpin(cli string) error {
 	var err error
 	var wg sync.WaitGroup
 
@@ -357,9 +446,9 @@ func (this SSHStruct) RemoteExecuteAndSpin(cli string) (SSHStruct, error) {
 		defer close(errorChan)
 		defer close(sigChan)
 		var e error
-		this.capture = false
-		this.silent = true
-		e = this.SecureRemoteExecution(cli)
+		s.capture = false
+		s.silent = true
+		e = s.SecureRemoteExecution(cli)
 		sigChan <- true
 		errorChan <- e
 	}()
@@ -367,7 +456,7 @@ func (this SSHStruct) RemoteExecuteAndSpin(cli string) (SSHStruct, error) {
 	//errorRec = <-errorChan
 	err = <-errorChan
 	wg.Wait()
-	return this, err
+	return err
 }
 
 // local, remote
@@ -429,9 +518,16 @@ func (s SSHStruct) WithRemoteDir(rd string) SSHStruct {
 	return s
 }
 
-func (s SSHStruct) GetBody() string {
-	return s.body
+func (s SSHStruct) GetStdout() string {
+	return s.stdout
 }
+func (s SSHStruct) GetStderr() string {
+	return s.stderr
+}
+func (s SSHStruct) GetBody() string {
+	return s.GetStdout()
+}
+
 func (s SSHStruct) GetRemoteDir() string {
 	return s.remoteDir
 }
@@ -528,10 +624,28 @@ func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error 
 	// Print the output
 	//fmt.Println("Remote command output:", outputBuffer.String())
 	VerbosePrintln("acquire body from session")
-	s.body = outputBuffer.String()
+	s.stdout = outputBuffer.String()
 	return nil
 }
 
 func (s SSHStruct) NotConfigured() bool {
 	return len(s.Key) == 0 || len(s.Host) == 0 || len(s.User) == 0
+}
+
+const dd_cli_fmt = "dd if=%s of=%s bs=1k count=1 seek=%d"
+
+func (s SSHStruct) WriteSparseFile(f string, sizeMin int, sizeMax int, r int) error {
+	minSize := sizeMin * 1024
+	return s.SecureRemoteExecution(fmt.Sprintf(dd_cli_fmt, "/dev/random", f, rand.Intn(sizeMax*1024-minSize+1)+minSize))
+}
+
+func (s SSHStruct) RemoveDirAndContent(d string) error {
+	VerbosePrintln("BEGIN RemoveDirAndContent(" + d + ")")
+	if len(d) > 2 && !strings.Contains(d, "*") && !strings.Contains(d, ".") {
+		VerbosePrintln("rm -rfv " + d)
+		VerbosePrintln("END RemoveDirAndContent(" + d + ")")
+		return s.RemoteExecuteAndSpin("rm -rfv " + d)
+		//return nil
+	}
+	return errors.New("removedir request did not pass requirements")
 }

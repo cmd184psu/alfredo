@@ -1,7 +1,10 @@
 package alfredo
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -156,4 +159,122 @@ func NotBlankIsMasked(s string) string {
 		return s
 	}
 	return "********"
+}
+
+func correctedParams(directoryPath *string, prefix *string, glob *string) {
+	(*glob) = strings.TrimPrefix(*glob, "*")
+	(*glob) = strings.TrimPrefix(*glob, ".")
+	(*prefix) = strings.TrimPrefix(*prefix, "/")
+	(*prefix) = strings.TrimSuffix(*prefix, "*")
+	(*directoryPath) = strings.TrimSuffix(*directoryPath, "/")
+}
+
+func GetFileFindCLI(directoryPath string, prefix string, glob string) string {
+	correctedParams(&directoryPath, &prefix, &glob)
+	return fmt.Sprintf("find " + directoryPath + " -iname \"" + prefix + "*." + glob + "\"")
+}
+
+func MoveDirs(needleSuffix string, st int, target string) error {
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			//VerbosePrintln(fmt.Sprintf("does %s have suffix needle %s?\n", path, needleSuffix))
+			//VerbosePrintln("\tfound directory!")
+			resolved := false
+			if strings.HasSuffix(path, needleSuffix) {
+				//VerbosePrintln("\tYES!")
+				for i := st; i < 100; i++ {
+					if !FileExistsEasy(fmt.Sprintf("%s-%d", target, i)) {
+						st = i
+						resolved = true
+						break
+					}
+				}
+				if !resolved {
+					panic("unable to create directory")
+				}
+
+				fmt.Printf("mv -n %q \"%s-%d\"\n", path, target, st)
+				st++
+			}
+			//  else {
+			// 	VerbosePrintln("\tNO!")
+			// }
+		}
+		return nil
+	})
+	return err
+}
+
+func FindFiles(directoryPath string, prefix string, glob string) ([]string, error) {
+	var fileArray []string
+	correctedParams(&directoryPath, &prefix, &glob)
+	//  {
+	// 	directoryPath = directoryPath[0 : len(directoryPath)-1]
+	// }
+
+	VerbosePrintln(fmt.Sprintf("directoryPath=%s", directoryPath))
+	VerbosePrintln("cli=" + GetFileFindCLI(directoryPath, prefix, glob))
+	err := filepath.Walk(directoryPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && filepath.Ext(path) == "."+glob {
+			//VerbosePrintln("not a directory and file extension is ." + glob)
+			//VerbosePrintln("")
+			// 	fmt.Sprintf("HasPrefix(%s,%s)=%s",
+			// 		path,
+			// 		directoryPath+"/"+prefix,
+			// 		TrueIsYes(strings.HasPrefix(path, directoryPath+"/"+prefix))
+			// 	)
+			// )
+			var t string
+			if strings.EqualFold(directoryPath, ".") {
+				t = prefix
+			} else {
+				t = directoryPath + "/" + prefix
+			}
+
+			if len(prefix) > 0 && strings.HasPrefix(path, t) ||
+				len(prefix) == 0 {
+				VerbosePrintln("appending " + path)
+				if strings.HasPrefix(path, "/") {
+					fileArray = append(fileArray, path)
+				} else {
+
+					fileArray = append(fileArray, directoryPath+"/"+path)
+				}
+			}
+			//  else {
+			// 	VerbosePrintln("NOT appending " + path)
+			// }
+		}
+		// else {
+		// 	VerbosePrintln("NOT appending " + path)
+		// }
+		return nil
+	})
+	VerbosePrintln("file array contains:")
+	for i := 0; i < len(fileArray); i++ {
+		VerbosePrintln(fmt.Sprintf("i=%d, item=%s", i, fileArray[i]))
+	}
+	return fileArray[:len(fileArray)-1], err
+}
+
+func RemoveFiles(directoryPath string, prefix string, glob string) error {
+	files, err := FindFiles(directoryPath, prefix, glob)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(files); i++ {
+		if strings.EqualFold(strings.TrimSpace(files[i]), "") {
+			return errors.New("blank file in list")
+		}
+		if err := RemoveFile(files[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
