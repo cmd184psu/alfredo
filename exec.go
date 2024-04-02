@@ -1,7 +1,6 @@
 package alfredo
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -152,7 +151,6 @@ func (ex *ExecStruct) Execute() error {
 		// 	ex.WatchSigChan <- true
 		// }
 		ex.ErrChan <- e
-		fmt.Println("leaving primary")
 	}()
 	if ex.OkToSpin() {
 		go ex.progressExecFunc(ex.SpinSigChan)
@@ -162,7 +160,6 @@ func (ex *ExecStruct) Execute() error {
 		go ex.watcherExecFunc(ex)
 	}
 	err = <-ex.ErrChan
-	fmt.Println("and now we wait")
 	wg.Wait()
 
 	VerbosePrintln("execute:: the wait is over")
