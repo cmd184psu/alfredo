@@ -42,7 +42,14 @@ type S3ClientSession struct {
 	PolicyId    string
 }
 
+func (s3c *S3ClientSession) ClearEndpoint(sep string) {
+	s3c.Endpoint = ""
+}
+
 func (s3c *S3ClientSession) SetEndpoint(sep string) {
+	if len(sep) == 0 {
+		panic("attempted to set endpoint to blank - use ClearEndpoint() instead")
+	}
 	s3c.Endpoint = sep
 
 	if !strings.HasPrefix(s3c.Endpoint, "http") {
@@ -97,7 +104,7 @@ func (s3c *S3ClientSession) EstablishSession() error {
 	}
 
 	if len(s3c.Endpoint) == 0 {
-		return errors.New("missing endpoint")
+		return PanicError("missing endpoint")
 	}
 
 	if len(s3c.Credentials.AccessKey) == 0 {

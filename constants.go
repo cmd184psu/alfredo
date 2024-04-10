@@ -12,6 +12,6 @@
 package alfredo
 
 const (
-	ALFREDO_VERSION = "23Oct2023 - 2000"
+	ALFREDO_VERSION = "5Apr2024 - 2000"
 	NOT_AVAILABLE   = "N/A"
 )

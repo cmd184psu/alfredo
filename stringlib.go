@@ -208,6 +208,74 @@ func MoveDirs(needleSuffix string, st int, target string) error {
 	return err
 }
 
+func MoveFiles(needleSuffix string, st int, target string) error {
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if strings.HasPrefix(path, "@") {
+			DebugPrintf("rejecting path %s", path)
+			return nil
+		}
+		if strings.HasPrefix(path, ".git") {
+			DebugPrintf("rejecting path %s", path)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var sfns, tfns FilenameStruct
+		if !info.IsDir() {
+			VerbosePrintln(fmt.Sprintf("does %s have suffix needle %s?\n", path, needleSuffix))
+			VerbosePrintln("\tfound file!")
+			tfns.Parse(target)
+
+			resolved := false
+			if strings.HasSuffix(path, needleSuffix) {
+				//VerbosePrintln("\tYES!")
+				for i := st; i < 100; i++ {
+					proposedFile := fmt.Sprintf("%s-%d%s", tfns.GetFullName(), i, sfns.ext)
+					VerbosePrintf("propsed new filename: %s", proposedFile)
+					if !FileExistsEasy(proposedFile) {
+						st = i
+						resolved = true
+						break
+					}
+				}
+				if !resolved {
+					panic("unable to create directory")
+				}
+
+				// # path=some/other/path/something.txt
+				// # fns.base=st
+				// # num=1
+				// # fns.ext=
+				// # GetFullName()=/home/cdelezenski/somewhereelse/st
+				// # moving file "some/other/path/something.txt" to "st-1."
+				// mv -nv "some/other/path/something.txt" "st-1."
+				// :::: does testfile.txt have suffix needle something.txt?
+				//  ::::
+				// :::: 	found file! ::::
+				// :::: alfredo::util.go::FilenameStruct::Parse(/home/cdelezenski/somewhereelse/st)=/home/cdelezenski/somewhereelse/st ::::
+				// # Concluded movedirs
+				// [cdelezenski@builder go-multiren]$ ./makemr && ./multiren-linux -filename something.txt -verbose -move -newpath /home/cdelezenski/somewhereelse/st
+				sfns.Parse(path)
+				CommentPrintf("path=%s", path) //found
+				CommentPrintf("fns.base=%s", tfns.base)
+				CommentPrintf("num=%d", st)
+				CommentPrintf("fns.ext=%s", sfns.ext)
+				CommentPrintf("GetFullName()=%s", tfns.GetFullName())
+
+				CommentPrintf("moving file %q to \"%s-%d%s\"", sfns.GetFullName(), tfns.GetFullName(), st, sfns.ext)
+				fmt.Printf("mv -nv %q \"%s-%d%s\"\n", sfns.GetFullName(), tfns.GetFullName(), st, sfns.ext)
+				st++
+			}
+			//  else {
+			// 	VerbosePrintln("\tNO!")
+			// }
+		}
+		return nil
+	})
+	return err
+}
+
 func FindFiles(directoryPath string, prefix string, glob string) ([]string, error) {
 	var fileArray []string
 	correctedParams(&directoryPath, &prefix, &glob)
