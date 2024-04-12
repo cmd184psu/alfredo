@@ -27,6 +27,7 @@ import (
 var verbose bool
 var debug bool
 var panicOnFail bool
+var experimental bool
 
 func SetVerbose(v bool) {
 	verbose = v
@@ -55,6 +56,15 @@ func GetPanic() bool {
 
 func getState(e string, s bool) bool {
 	return strings.EqualFold(os.Getenv(e), "1") || s
+}
+
+func GetExperimental() bool {
+	return getState("EXPERIMENTAL", experimental)
+}
+
+func SetExperimental(e bool) {
+	experimental = e
+	os.Setenv("EXPERIMENTAL", "1")
 }
 
 func PanicError(msg string) error {
