@@ -165,3 +165,26 @@ func (ex *ExecStruct) Execute() error {
 	VerbosePrintln("execute:: the wait is over")
 	return err
 }
+
+func LocalExecuteAndSpin(cli string) error {
+	var err error
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	sigChan := make(chan bool)
+	errorChan := make(chan error)
+	go func() {
+		defer wg.Done()
+		defer close(errorChan)
+		defer close(sigChan)
+
+		e := System3(cli)
+		sigChan <- true
+		errorChan <- e
+	}()
+	go Spinny(sigChan)
+	//errorRec = <-errorChan
+	err = <-errorChan
+	wg.Wait()
+	return err
+}
