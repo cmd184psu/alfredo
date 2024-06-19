@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"gopkg.in/ini.v1"
 )
 
 type S3credStruct struct {
@@ -35,12 +37,15 @@ type S3ClientSession struct {
 	Bucket      string
 	Endpoint    string
 	Region      string
+	ObjectKey   string
 	Client      *s3.S3
 	Versioning  bool
 	established bool
 	keepBucket  bool
 	PolicyId    string
 }
+
+const S3_default_credentials_file = "~/.aws/credentials"
 
 func (s3c *S3ClientSession) ClearEndpoint(sep string) {
 	s3c.Endpoint = ""
@@ -361,6 +366,27 @@ func (this S3ClientSession) SyncInner(trimsz int, localPath string) error {
 	return nil
 }
 
+func (s3c S3ClientSession) ListObjectsWithPrefix(prefix string) ([]string, error) {
+	VerbosePrintf("BEGIN: ListObjectsWithPrefix(%s)", prefix)
+	// List all objects in the bucket.
+	VerbosePrintln("bucket=" + s3c.Bucket)
+
+	resp, err := s3c.Client.ListObjectsV2(&s3.ListObjectsV2Input{
+		Bucket: aws.String(s3c.Bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	var results []string
+	if err != nil {
+		return results, err
+	}
+	for _, item := range resp.Contents {
+		results = append(results, *item.Key)
+	}
+	VerbosePrintf("BEGIN: ListObjectsWithPrefix(%s)", prefix)
+	return results, nil
+}
+
 func (this S3ClientSession) RecursiveBucketDelete() error {
 	VerbosePrintln("BEGIN: RecursiveBucketDelete()")
 	var err error
@@ -563,4 +589,138 @@ func (s3c S3ClientSession) IsVersioningEnabled() bool {
 
 	// Check if versioning is enabled
 	return strings.EqualFold(aws.StringValue(result.Status), "Enabled")
+}
+
+type AWSProfile struct {
+	AccessKeyID     string `ini:"aws_access_key_id"`
+	SecretAccessKey string `ini:"aws_secret_access_key"`
+}
+
+// f = ~/.aws/credentials
+func (s3c *S3ClientSession) LoadCredentials(f string) error {
+	filename := ExpandTilde(f)
+	if !FileExistsEasy(filename) {
+		return fmt.Errorf("file %s does not exist", filename)
+	}
+	VerbosePrintf("loading %s", filename)
+	cfg, err := ini.Load(filename)
+	if err != nil {
+		return err
+	}
+
+	// Define a map to store profiles
+	//profiles := make(map[string]AWSProfile)
+
+	// Loop through each section in the configuration file
+	for _, section := range cfg.Sections() {
+		// Skip the default section
+		if section.Name() == ini.DefaultSection {
+			continue
+		}
+		VerbosePrintf("compareing %s vs %s", s3c.Credentials.Profile, section.Name())
+
+		if strings.EqualFold(s3c.Credentials.Profile, section.Name()) {
+			VerbosePrintf("\tfound!")
+			// Create a new AWSProfile instance
+			p := AWSProfile{}
+			// Map the section to the AWSProfile struct
+			if err := section.MapTo(&p); err != nil {
+				VerbosePrintln("error: " + err.Error())
+				return err
+			}
+			VerbosePrintf("ak=%s sk=%s", p.AccessKeyID, p.SecretAccessKey)
+			s3c.Credentials.AccessKey = p.AccessKeyID
+			s3c.Credentials.SecretKey = p.SecretAccessKey
+			return nil
+		} else {
+			VerbosePrintf("\trejected!")
+		}
+	}
+	return fmt.Errorf("profile %s was not found in configuration file %s", s3c.Credentials.Profile, f)
+}
+
+func (s3c *S3ClientSession) LoadUserCredentialsForProfile() error {
+	return s3c.LoadCredentials(S3_default_credentials_file)
+}
+
+func (s3c *S3ClientSession) PresignedURL(expiredHours int) (string, error) {
+	VerbosePrintf("BEGIN::PresignedURL(%d)", expiredHours)
+
+	VerbosePrintf("\tbucket=%q", s3c.Bucket)
+	VerbosePrintf("\tkey=%q", s3c.ObjectKey)
+	if s3c.Client == nil {
+		panic(errors.New("s3c.Client is nil"))
+	}
+	req, _ := s3c.Client.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: aws.String(s3c.Bucket),
+		Key:    aws.String(s3c.ObjectKey),
+	})
+	result, err := req.Presign(time.Duration(expiredHours*3600) * time.Second)
+	VerbosePrintf("END::PresignedURL(%d)", expiredHours)
+	return result, err
+}
+
+func (s3c *S3ClientSession) GetObject() ([]byte, error) {
+	// Get the object from S3
+	result, err := s3c.Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(s3c.Bucket),
+		Key:    aws.String(s3c.ObjectKey),
+	})
+	if err != nil {
+		return make([]byte, 0), err
+	}
+	defer result.Body.Close()
+	return io.ReadAll(result.Body)
+}
+
+func (s3c *S3ClientSession) HeadObject() (bool, error) {
+	_, err := s3c.Client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(s3c.Bucket),
+		Key:    aws.String(s3c.ObjectKey),
+	})
+
+	if err != nil {
+
+		if strings.Contains(err.Error(), "status code: 404") {
+
+			//if aerr, ok := err.(awserr.Error); ok && aerr.Code() == s3.ErrCodeNoSuchKey {
+			// Object does not exist
+			VerbosePrintln("returning false,nil because error was caught")
+			return false, nil
+		}
+		// Some other error occurred
+		VerbosePrintf("returning false,ERR because error was not caught: %q", err.Error())
+		return false, err
+	}
+
+	// Object exists
+	return true, nil
+}
+
+func (s3c *S3ClientSession) ObjectExists() bool {
+	b, err := s3c.HeadObject()
+	if err != nil {
+		panic(err.Error())
+	}
+	return b
+}
+
+func (s3c *S3ClientSession) GetObjectHash() (string, error) {
+	ba, err := s3c.GetObject()
+	return MD5SumBA(ba), err
+}
+
+// expected: s3://bucket/object
+func (s3c *S3ClientSession) ParseFromURL(url string) error {
+	if !strings.HasPrefix(url, "s3://") {
+		return errors.New("malformed URL")
+	}
+	parts := strings.Split(url[5:], "/")
+	s3c.Bucket = parts[0]
+	s3c.ObjectKey = strings.Join(parts[1:], "/")
+	return nil
+}
+
+func (s3c *S3ClientSession) GetURL() string {
+	return fmt.Sprintf("s3://%s/%s", s3c.Bucket, s3c.ObjectKey)
 }
