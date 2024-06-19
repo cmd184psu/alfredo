@@ -1,7 +1,8 @@
 package alfredo
 
 import (
-	"errors"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,16 @@ func SliceContains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func GetFirstLineFromSlice(content string, needle string) string {
+	list := strings.Split(content, "\n")
+	for i := 0; i < len(list); i++ {
+		if strings.HasPrefix(list[i], needle) {
+			return list[i]
+		}
+	}
+	return ""
 }
 
 func EmptyString(s string) bool {
@@ -161,6 +172,20 @@ func NotBlankIsMasked(s string) string {
 	return "********"
 }
 
+func ExpandTilde(f string) string {
+	if !strings.HasPrefix(f, "~") {
+		return f
+	}
+	if strings.HasPrefix(f, "~/") {
+		return fmt.Sprintf("%s/%s", os.Getenv("HOME"), f[2:])
+	}
+	if strings.HasPrefix(f, "~") {
+		dirs := strings.Split(os.Getenv("HOME"), "/")
+		return fmt.Sprintf("/%s/%s", dirs[1], f[1:])
+	}
+	return f
+}
+
 func correctedParams(directoryPath *string, prefix *string, glob *string) {
 	(*glob) = strings.TrimPrefix(*glob, "*")
 	(*glob) = strings.TrimPrefix(*glob, ".")
@@ -276,73 +301,32 @@ func MoveFiles(needleSuffix string, st int, target string) error {
 	return err
 }
 
-func FindFiles(directoryPath string, prefix string, glob string) ([]string, error) {
-	var fileArray []string
-	correctedParams(&directoryPath, &prefix, &glob)
-	//  {
-	// 	directoryPath = directoryPath[0 : len(directoryPath)-1]
-	// }
-
-	VerbosePrintln(fmt.Sprintf("directoryPath=%s", directoryPath))
-	VerbosePrintln("cli=" + GetFileFindCLI(directoryPath, prefix, glob))
-	err := filepath.Walk(directoryPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && filepath.Ext(path) == "."+glob {
-			//VerbosePrintln("not a directory and file extension is ." + glob)
-			//VerbosePrintln("")
-			// 	fmt.Sprintf("HasPrefix(%s,%s)=%s",
-			// 		path,
-			// 		directoryPath+"/"+prefix,
-			// 		TrueIsYes(strings.HasPrefix(path, directoryPath+"/"+prefix))
-			// 	)
-			// )
-			var t string
-			if strings.EqualFold(directoryPath, ".") {
-				t = prefix
-			} else {
-				t = directoryPath + "/" + prefix
-			}
-
-			if len(prefix) > 0 && strings.HasPrefix(path, t) ||
-				len(prefix) == 0 {
-				VerbosePrintln("appending " + path)
-				if strings.HasPrefix(path, "/") {
-					fileArray = append(fileArray, path)
-				} else {
-
-					fileArray = append(fileArray, directoryPath+"/"+path)
-				}
-			}
-			//  else {
-			// 	VerbosePrintln("NOT appending " + path)
-			// }
-		}
-		// else {
-		// 	VerbosePrintln("NOT appending " + path)
-		// }
-		return nil
-	})
-	VerbosePrintln("file array contains:")
-	for i := 0; i < len(fileArray); i++ {
-		VerbosePrintln(fmt.Sprintf("i=%d, item=%s", i, fileArray[i]))
+func HasBase(filename string, base string) bool {
+	var f FilenameStruct
+	if err := f.Parse(filename); err != nil {
+		panic(err.Error())
 	}
-	return fileArray[:len(fileArray)-1], err
+
+	if strings.HasPrefix(base, "*") && strings.HasSuffix(base, "*") {
+		return strings.Contains(f.GetBase(), base[1:(len(base)-1)])
+	}
+	if strings.HasPrefix(base, "*") {
+		return strings.HasSuffix(f.GetBase(), base[1:])
+	}
+	VerbosePrintf("should get here: HasSuffix(%s,%s)=%s", f.GetBase(), base[:(len(base)-1)], TrueIsYes(strings.HasSuffix(base, "*")))
+	if strings.HasSuffix(base, "*") {
+		VerbosePrintf("\tRETURN=%s", TrueIsYes(strings.HasSuffix(f.GetBase(), base[:(len(base)-1)])))
+		return strings.HasSuffix(f.GetBase(), base[:(len(base)-1)])
+	}
+
+	return strings.EqualFold(f.GetBase(), base)
 }
 
-func RemoveFiles(directoryPath string, prefix string, glob string) error {
-	files, err := FindFiles(directoryPath, prefix, glob)
-	if err != nil {
-		return err
-	}
-	for i := 0; i < len(files); i++ {
-		if strings.EqualFold(strings.TrimSpace(files[i]), "") {
-			return errors.New("blank file in list")
-		}
-		if err := RemoveFile(files[i]); err != nil {
-			return err
-		}
-	}
-	return nil
+func MD5SumBA(ba []byte) string {
+	hash := md5.Sum(ba)
+	return hex.EncodeToString(hash[:])
+}
+
+func MD5SumString(s string) string {
+	return MD5SumBA([]byte(s))
 }
