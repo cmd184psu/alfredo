@@ -209,7 +209,7 @@ func (fns FilenameStruct) WithModTime(mt string) FilenameStruct {
 	return fns
 }
 func (fns FilenameStruct) GetBase() string {
-	return fns.modtime
+	return fns.base
 }
 func (fns *FilenameStruct) SetBase(b string) {
 	fns.base = b
