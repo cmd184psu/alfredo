@@ -1,6 +1,9 @@
 package alfredo
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // simple test of a 3 character string; month or not a month;  Not locale friendly!
 func IsMonth(m string) bool {
@@ -21,4 +24,16 @@ func IsMonth(m string) bool {
 		}
 	}
 	return false
+}
+
+const (
+	TIME_FORMAT_1 = "02Jan06-03:04PM"
+)
+
+func GetFormattedTime(fmt string) string {
+	return time.Now().Format(fmt)
+}
+
+func GetFormattedTime1() string {
+	return GetFormattedTime(TIME_FORMAT_1)
 }
