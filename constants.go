@@ -14,4 +14,5 @@ package alfredo
 const (
 	ALFREDO_VERSION = "5Apr2024 - 2000"
 	NOT_AVAILABLE   = "N/A"
+	VERBOSE_ENV     = "VERBOSE"
 )
