@@ -123,7 +123,7 @@ func TestSSHlistOpt(t *testing.T) {
 	ssh.SetRemoteDir("/opt")
 	cli := "ls -lah"
 
-	if ssh, err = ssh.RemoteExecuteAndSpin(cli); err != nil {
+	if err = ssh.RemoteExecuteAndSpin(cli); err != nil {
 		t.Errorf(err.Error())
 	}
 	fmt.Println(ssh.GetBody())
@@ -147,13 +147,13 @@ func TestSSHPipeContentToSSHCLI(t *testing.T) {
 	}
 	fmt.Println(ssh.GetBody())
 
-	if ssh, err = ssh.RemoteExecuteAndSpin("stat " + remotefile); err != nil {
+	if err = ssh.RemoteExecuteAndSpin("stat " + remotefile); err != nil {
 		t.Errorf(err.Error())
 	}
 	fmt.Println("---")
 	fmt.Println(ssh.GetBody())
 	fmt.Println("---")
-	if ssh, err = ssh.RemoteExecuteAndSpin("cat " + remotefile); err != nil {
+	if err = ssh.RemoteExecuteAndSpin("cat " + remotefile); err != nil {
 		t.Errorf(err.Error())
 	}
 	fmt.Println(ssh.GetBody())
@@ -176,13 +176,13 @@ func TestSSHContentToRemoteFile(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 
-	if ssh, err = ssh.RemoteExecuteAndSpin("stat " + remotefile); err != nil {
+	if err = ssh.RemoteExecuteAndSpin("stat " + remotefile); err != nil {
 		t.Errorf(err.Error())
 	}
 	fmt.Println("---")
 	fmt.Println(ssh.GetBody())
 	fmt.Println("---")
-	if ssh, err = ssh.RemoteExecuteAndSpin("cat " + remotefile); err != nil {
+	if err = ssh.RemoteExecuteAndSpin("cat " + remotefile); err != nil {
 		t.Errorf(err.Error())
 	}
 	fmt.Println(ssh.GetBody())
@@ -241,12 +241,171 @@ func TestSSHStruct_WriteSparseFile(t *testing.T) {
 				stdout:    tt.fields.stdout,
 				stderr:    tt.fields.stderr,
 				port:      tt.fields.port,
-				remoteDir: tt.fields.remoteDir,
+				RemoteDir: tt.fields.remoteDir,
 				silent:    tt.fields.silent,
 				exitCode:  tt.fields.exitCode,
 			}
 			if err := s.WriteSparseFile(tt.args.f, tt.args.sizeMin, tt.args.sizeMax, tt.args.r); (err != nil) != tt.wantErr {
 				t.Errorf("SSHStruct.WriteSparseFile() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// func TestSSHStruct_CrossCopy(t *testing.T) {
+// 	var sshtgt SSHStruct
+// 	sshtgt.Key = ExpandTilde("~/.ssh/homelab_rsa")
+// 	sshtgt.Host = "192.168.1.33"
+// 	sshtgt.User = "root"
+
+// 	type fields struct {
+// 		Key       string
+// 		User      string
+// 		Host      string
+// 		capture   bool
+// 		stdout    string
+// 		stderr    string
+// 		port      int
+// 		RemoteDir string
+// 		silent    bool
+// 		exitCode  int
+// 	}
+// 	type args struct {
+// 		srcFile string
+// 		tgtssh  SSHStruct
+// 		tgtFile string
+// 	}
+// 	tests := []struct {
+// 		name    string
+// 		fields  fields
+// 		args    args
+// 		wantErr bool
+// 	}{
+// 		{
+// 			name: "base test",
+// 			fields: fields{
+// 				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+// 				User: "cdelezenski",
+// 				Host: "builder.cmdhome.net",
+// 			},
+// 			args: args{
+// 				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+// 				tgtssh:  sshtgt,
+// 				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+// 			},
+// 		},
+// 	}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			srcssh := &SSHStruct{
+// 				Key:       tt.fields.Key,
+// 				User:      tt.fields.User,
+// 				Host:      tt.fields.Host,
+// 				capture:   tt.fields.capture,
+// 				stdout:    tt.fields.stdout,
+// 				stderr:    tt.fields.stderr,
+// 				port:      tt.fields.port,
+// 				RemoteDir: tt.fields.RemoteDir,
+// 				silent:    tt.fields.silent,
+// 				exitCode:  tt.fields.exitCode,
+// 			}
+// 			if err := srcssh.CrossCopy(tt.args.srcFile, tt.args.tgtssh, tt.args.tgtFile); (err != nil) != tt.wantErr {
+// 				t.Errorf("SSHStruct.CrossCopy() error = %v, wantErr %v", err, tt.wantErr)
+// 			}
+// 		})
+// 	}
+// }
+
+func TestSSHStruct_CrossCopy(t *testing.T) {
+	var sshtgt SSHStruct
+	sshtgt.Key = ExpandTilde("~/.ssh/homelab_rsa")
+	sshtgt.Host = "192.168.1.33"
+	sshtgt.User = "root"
+
+	type fields struct {
+		Key       string
+		User      string
+		Host      string
+		capture   bool
+		stdout    string
+		stderr    string
+		port      int
+		RemoteDir string
+		silent    bool
+		exitCode  int
+		ccmode    CrossCopyModeType
+	}
+	type args struct {
+		srcFile string
+		tgtssh  SSHStruct
+		tgtFile string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "base test - temp file",
+			fields: fields{
+				Key:    ExpandTilde("~/.ssh/homelab_rsa"),
+				User:   "cdelezenski",
+				Host:   "builder.cmdhome.net",
+				ccmode: GetCCTypeOf("temp"),
+			},
+			args: args{
+				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				tgtssh:  sshtgt,
+				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+			},
+		},
+		{
+			name: "base test - via shell",
+			fields: fields{
+				Key:    ExpandTilde("~/.ssh/homelab_rsa"),
+				User:   "cdelezenski",
+				Host:   "builder.cmdhome.net",
+				ccmode: CCMVIASHELL,
+			},
+			args: args{
+				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				tgtssh:  sshtgt,
+				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+			},
+		},
+		{
+			name: "base test - via memory",
+			fields: fields{
+				Key:    ExpandTilde("~/.ssh/homelab_rsa"),
+				User:   "cdelezenski",
+				Host:   "builder.cmdhome.net",
+				ccmode: CCMVIAMEMORY,
+			},
+			args: args{
+				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				tgtssh:  sshtgt,
+				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srcssh := &SSHStruct{
+				Key:       tt.fields.Key,
+				User:      tt.fields.User,
+				Host:      tt.fields.Host,
+				capture:   tt.fields.capture,
+				stdout:    tt.fields.stdout,
+				stderr:    tt.fields.stderr,
+				port:      tt.fields.port,
+				RemoteDir: tt.fields.RemoteDir,
+				silent:    tt.fields.silent,
+				exitCode:  tt.fields.exitCode,
+				ccmode:    tt.fields.ccmode,
+			}
+			if err := srcssh.CrossCopy(tt.args.srcFile, tt.args.tgtssh, tt.args.tgtFile); (err != nil) != tt.wantErr {
+				t.Errorf("SSHStruct.CrossCopyInMemory() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
