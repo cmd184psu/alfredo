@@ -25,6 +25,7 @@ import (
 
 // the only global variable, Verbose is only used directly by the VerbosePrintln() function
 var verbose bool
+var force bool
 var debug bool
 var panicOnFail bool
 var experimental bool
@@ -44,6 +45,14 @@ func SetDebug(b bool) {
 
 func GetDebug() bool {
 	return getState("DEBUG", debug)
+}
+func SetForce(f bool) {
+	force = f
+	os.Setenv("FORCE", "1")
+}
+
+func GetForce() bool {
+	return getState("FORCE", force)
 }
 
 func SetPanic(p bool) {
