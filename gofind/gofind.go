@@ -25,7 +25,49 @@ import (
 // 	return false
 // }
 
-func LocalFindFiles2(root string, pattern string) []string {
+type INodeType int64
+
+const (
+	AllInodes INodeType = iota
+	RegFileInodes
+	DirectoryInodes
+	SymlinkInodes
+)
+
+func GetFiletype(t string) INodeType {
+	if strings.EqualFold(t, RegFileInodes.String()) {
+		return RegFileInodes
+	}
+	if strings.EqualFold(t, SymlinkInodes.String()) {
+		return SymlinkInodes
+	}
+	if strings.EqualFold(t, DirectoryInodes.String()) {
+		return DirectoryInodes
+	}
+	return AllInodes
+}
+
+func (i INodeType) String() string {
+	if i == RegFileInodes {
+		return "f"
+	}
+	if i == DirectoryInodes {
+		return "d"
+	}
+	if i == SymlinkInodes {
+		return "l"
+	}
+	return "a"
+}
+
+func GetCLI(root string, pattern string, inType INodeType) string {
+	if inType != AllInodes {
+		return fmt.Sprintf("find %s -iname %q -type %q", root, pattern, inType.String())
+	}
+	return fmt.Sprintf("find %s -iname %q", root, pattern)
+}
+
+func LocalFindFiles2(root string, pattern string, inType INodeType) []string {
 	var fileArray []string
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -38,8 +80,22 @@ func LocalFindFiles2(root string, pattern string) []string {
 			return err
 		}
 		if matched {
-			fileArray = append(fileArray, path)
-
+			switch inType {
+			case AllInodes:
+				fileArray = append(fileArray, path)
+			case RegFileInodes:
+				if info.Mode().IsRegular() {
+					fileArray = append(fileArray, path)
+				}
+			case DirectoryInodes:
+				if info.IsDir() {
+					fileArray = append(fileArray, path)
+				}
+			case SymlinkInodes:
+				if !info.Mode().IsRegular() {
+					fileArray = append(fileArray, path)
+				}
+			}
 		}
 		return nil
 	})
@@ -134,13 +190,18 @@ func main() {
 	if len(os.Args) > 2 && strings.EqualFold(strings.ToLower(os.Args[2]), "-iname") {
 		prefix = os.Args[3]
 	}
-
-	fmt.Printf("find %s -iname %q\n", path, prefix)
+	findType := AllInodes
+	if len(os.Args) > 4 && strings.EqualFold(strings.ToLower(os.Args[3]), "-type") {
+		fmt.Println("---starting anew")
+		findType = GetFiletype(os.Args[4])
+	}
+	fmt.Println(GetCLI(path, prefix, findType))
+	//fmt.Printf("find %s -iname %q%s\n", path, prefix, findType.String())
 	fmt.Println("--------------------")
-	list := LocalFindFiles2(path, prefix)
-	fmt.Println("find ./ -iname \"prefix*\"")
-	fmt.Println("\tpath=./ ---> arg1")
-	fmt.Println("\tprefix* --> arg1 of iname")
+	list := LocalFindFiles2(path, prefix, findType)
+	//fmt.Println("find ./ -iname \"prefix*\"")
+	//fmt.Println("\tpath=./ ---> arg1")
+	//fmt.Println("\tprefix* --> arg1 of iname")
 	fmt.Println("------start of list ---------")
 	for i := 0; i < len(list); i++ {
 		fmt.Printf("\t%s\n", list[i])
