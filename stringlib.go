@@ -50,6 +50,20 @@ func GetFirstLineFromSlice(content string, needle string) string {
 	return ""
 }
 
+func GetFirstLineFromFile(f string) string {
+	if !FileExistsEasy(f) {
+		panic(fmt.Sprintf("File not found: %s", f))
+	}
+	list, err := LoadFileIntoSlice(f)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to load file into slice: %s", f))
+	}
+	if len(list) == 0 {
+		panic(fmt.Sprintf("File was empty: %s", f))
+	}
+	return list[0]
+}
+
 func EmptyString(s string) bool {
 	return len(s) == 0
 }

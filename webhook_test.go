@@ -18,7 +18,7 @@ func TestWebHookStruct_SendMsg(t *testing.T) {
 		{
 			name: "base test",
 			fields: fields{
-				WebHookURL: "https://hooks.slack.com/services/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",
+				WebHookURL: GetFirstLineFromFile("./webhook.url"),
 			},
 			args: args{
 				msg: "test run",
