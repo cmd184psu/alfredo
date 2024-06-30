@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -343,4 +344,37 @@ func MD5SumBA(ba []byte) string {
 
 func MD5SumString(s string) string {
 	return MD5SumBA([]byte(s))
+}
+
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func GenerateRandomAlphanumString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letterBytes[rand.Intn(len(letterBytes))]
+	}
+	return string(b)
+}
+
+func GetClassName(fields []string) string {
+	for i, field := range fields {
+		if field == "java" {
+			// Iterate over subsequent fields to find the main class name
+			for j := i + 1; j < len(fields); j++ {
+				if !strings.HasPrefix(fields[j], "-") {
+					// Skip over -D, -X, and other JVM options
+					if !strings.HasPrefix(fields[j], "/") && !strings.Contains(fields[j], "=") {
+						return fields[j]
+					}
+				}
+			}
+		}
+	}
+	return "Unknown"
+}
+
+// getLastSegment returns the last segment of a dot-separated class name
+func GetClassNameLastSegment(className string) string {
+	segments := strings.Split(className, ".")
+	return segments[len(segments)-1]
 }

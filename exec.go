@@ -1,8 +1,11 @@
 package alfredo
 
 import (
+	"fmt"
 	"io"
+	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -187,4 +190,41 @@ func LocalExecuteAndSpin(cli string) error {
 	err = <-errorChan
 	wg.Wait()
 	return err
+}
+
+func RunToLess(cmd1 *exec.Cmd) error {
+	//cmd1 := exec.Command("myprogram", "-help")
+
+	// Create the command for `less`
+	cmd2 := exec.Command("less")
+
+	// Create a pipe for the output of `myprogram -help`
+	cmd1Out, err := cmd1.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Error creating stdout pipe for cmd1: %v", err)
+	}
+
+	// Set the stdin of `less` to the stdout of `myprogram -help`
+	cmd2.Stdin = cmd1Out
+
+	// Start the first command
+	if err := cmd1.Start(); err != nil {
+		return fmt.Errorf("Error starting cmd1: %v", err)
+	}
+
+	// Start the second command
+	if err := cmd2.Start(); err != nil {
+		return fmt.Errorf("Error starting cmd2: %v", err)
+	}
+
+	// Wait for the first command to finish
+	if err := cmd1.Wait(); err != nil {
+		return fmt.Errorf("Error waiting for cmd1: %v", err)
+	}
+
+	// Wait for the second command to finish
+	if err := cmd2.Wait(); err != nil {
+		return fmt.Errorf("Error waiting for cmd2: %v", err)
+	}
+	return nil
 }

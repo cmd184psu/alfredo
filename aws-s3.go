@@ -34,15 +34,15 @@ type S3credStruct struct {
 
 type S3ClientSession struct {
 	Credentials S3credStruct `json:"s3creds"`
-	Bucket      string
-	Endpoint    string
-	Region      string
-	ObjectKey   string
+	Bucket      string       `json:"bucket"`
+	Endpoint    string       `json:"endpoint"`
+	Region      string       `json:"region"`
+	ObjectKey   string       `json:"key"`
 	Client      *s3.S3
-	Versioning  bool
+	Versioning  bool `json:"versioning"`
 	established bool
 	keepBucket  bool
-	PolicyId    string
+	PolicyId    string `json:"policyid"`
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
@@ -99,6 +99,7 @@ func (s3c S3ClientSession) KeepBucket() S3ClientSession {
 }
 
 func (s3c *S3ClientSession) EstablishSession() error {
+	VerbosePrintln("BEGIN S3ClientSession::EstablishSession()")
 	if s3c.established {
 		return nil
 	}
@@ -130,6 +131,7 @@ func (s3c *S3ClientSession) EstablishSession() error {
 	sess := session.Must(session.NewSession(awsConfig))
 	s3c.Client = s3.New(sess)
 	s3c.established = true
+	VerbosePrintln("END S3ClientSession::EstablishSession()")
 	return nil
 }
 
@@ -517,20 +519,23 @@ func (s3s S3ClientSession) ListBuckets() []string {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			default:
+				VerbosePrintf("(1) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
 				panic(aerr.Error())
 			}
 		} else {
 			// Print the error, cast err to awserr.Error to get the Code and
 			// Message from an error.
+			VerbosePrintf("(2) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
 			panic(err.Error())
 		}
 	}
 
 	var returnVal []string
 	if err != nil {
+		VerbosePrintf("(3) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
 		panic(err.Error())
 	}
-
+	VerbosePrintf("resulting bucket list has %s elements", len(result.Buckets))
 	for _, bucket := range result.Buckets {
 		returnVal = append(returnVal, *bucket.Name)
 	}

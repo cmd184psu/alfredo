@@ -358,36 +358,6 @@ func Popen3Grep(cmd string, musthave string, mustnothave string) ([]string, erro
 	return newslice, nil
 }
 
-// func Popen3DoubleGrep(cmd string, musthave string) ([]string, error) {
-// 	var b bytes.Buffer
-// 	arglist := strings.Split(cmd, " ")
-
-// 	//check for len<2 and return null array
-
-// 	var greplist []string
-// 	if len(musthave) != 0 {
-// 		greplist = strings.Split(musthave, "&")
-// 	}
-
-// 	//app:=arglist[0]
-// 	var err error
-
-// 	//case 1: popen and grep
-// 	if len(greplist) == 2 {
-// 		if err = Popen3(&b,
-// 			exec.Command(arglist[0], arglist[1:]...),
-// 			exec.Command("grep", greplist[0]),
-// 			exec.Command("grep", greplist[1]),
-// 		); err != nil {
-// 			log.Fatalln(err)
-// 		}
-// 	} else {
-// 		return make([]string, 0), &os.SyscallError{}
-// 	}
-// 	slice := strings.Split(b.String(), "\n")
-// 	return slice[:len(slice)-1], nil
-// }
-
 func SSHPopenToString(hostname string, command string) (string, error) {
 	client, session, err := getsshclient(hostname)
 	if err != nil {
@@ -716,4 +686,148 @@ func MkdirAll(path string) error {
 		return nil
 	}
 	return os.MkdirAll(path, 0755)
+}
+
+type jpsProcStruct struct {
+	pid       int
+	className string
+}
+
+//USAGE: (local)
+// jlist,err:=JPS() //list of all local java processes
+// pidlist:=JPSStructListToIntList(SliceToJPSStruct(jlist),"BucketMigrator") // convert to list of pids
+//
+// or
+//
+// fmt.Println(GetStringListFromJPS(SliceToJPSStruct(jlist)))
+
+//USAGE: (remote)
+// jlist,err:=s.RemoteJPS()
+// pidlist:=JPSStructListToIntList(SliceToJPSStruct(jlist),"BucketMigrator") // convert to list of pids
+//
+// or
+//
+// fmt.Println(GetStringListFromJPS(SliceToJPSStruct(jlist)))
+
+func JPS() ([]string, error) {
+	return Popen3Grep("ps aux", "java", "grep")
+}
+
+func SlicetoJPSStruct(lines []string, hint string) []jpsProcStruct {
+	// Iterate through the lines and filter for Java processes
+	var c string
+	var result []jpsProcStruct
+	for _, line := range lines {
+		c = ""
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			pid, err := strconv.Atoi(fields[1])
+			if err != nil {
+				panic(err.Error())
+			}
+			if len(hint) > 0 {
+				for f := 0; f < len(fields); f++ {
+					if strings.Contains(fields[f], hint) {
+						c = GetClassNameLastSegment(fields[f])
+					}
+				}
+			}
+			if len(c) == 0 {
+				if strings.Contains(fields[len(fields)-1], "/") && strings.Contains(fields[len(fields)-2], "/") {
+					c = GetClassNameLastSegment(fields[len(fields)-3])
+				} else if strings.EqualFold(strings.ToLower(fields[len(fields)-1]), "start") {
+					c = GetClassNameLastSegment(fields[len(fields)-2])
+				} else {
+					c = GetClassNameLastSegment(fields[len(fields)-1])
+				}
+			}
+			if len(c) == 0 {
+				result = append(result, jpsProcStruct{pid: pid, className: "Unkown"})
+			} else {
+				result = append(result, jpsProcStruct{pid: pid, className: c})
+			}
+		}
+	}
+	return result
+}
+
+func JPSStructListToIntList(jps []jpsProcStruct, classname string) []int {
+	var result []int
+	for i := 0; i < len(jps); i++ {
+		if strings.EqualFold(strings.ToLower(jps[i].className), strings.ToLower(classname)) {
+			result = append(result, jps[i].pid)
+		}
+	}
+	return result
+}
+
+func (j jpsProcStruct) ToString() string {
+	return fmt.Sprintf("%d %s", j.pid, j.className)
+}
+
+func GetStringListFromJPS(jlist []jpsProcStruct) []string {
+	var slist []string
+	for i := 0; i < len(jlist); i++ {
+		slist = append(slist, jlist[i].ToString())
+	}
+	return slist
+}
+func (j jpsProcStruct) GetPid() int {
+	return j.pid
+}
+func (j jpsProcStruct) GetClassName() string {
+	return j.className
+}
+
+func ParseThreadCount(status string) (int, error) {
+	lines := strings.Split(status, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Threads:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return strconv.Atoi(parts[1])
+			}
+		}
+	}
+	return 0, errors.New("thread Count not found")
+}
+
+func GetThreadCount(pid int) (int, error) {
+	if pid == -1 {
+		//if the process is dead, it's not using threads; so return 0
+		return 0, nil
+	}
+	statusBytes, err := os.ReadFile(fmt.Sprintf(pid_status_format, pid))
+	if err != nil {
+		return 0, err
+	}
+	return ParseThreadCount(string(statusBytes))
+}
+
+const no_processes_found = "no processes found"
+
+func CapturePid(jvm string, hint string) (int, error) {
+	VerbosePrintln("BEGIN CapturePid(" + jvm + ")")
+	lines, err := JPS()
+	if err != nil {
+		VerbosePrintf("\treturning with err: %s", err.Error())
+		return 0, err
+	}
+	jlist := JPSStructListToIntList(SlicetoJPSStruct(lines, hint), jvm)
+	if len(jlist) == 0 {
+		return 0, fmt.Errorf(no_processes_found)
+	}
+	if len(jlist) > 1 {
+		return jlist[0], fmt.Errorf("multiple processes found, returning first")
+	}
+	VerbosePrintln("END CapturePid(" + jvm + ")")
+	return jlist[0], nil
+}
+
+func GetArgsFromPid(pid int) ([]string, error) {
+	cmdlineBytes, err := os.ReadFile(fmt.Sprintf(pid_cmdline_format, pid))
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(string(cmdlineBytes), "\x00"), nil
 }

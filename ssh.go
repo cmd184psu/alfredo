@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"os"
 	"os/user"
@@ -26,6 +25,8 @@ const (
 	CCMVIASHELL
 	CCMTEMPFILE
 )
+
+const ssh_default_connection_timeout = 10
 
 func (cc CrossCopyModeType) String() string {
 	switch cc {
@@ -50,17 +51,18 @@ func GetCCTypeOf(cc string) CrossCopyModeType {
 }
 
 type SSHStruct struct {
-	Key       string `json:"key"`
-	User      string `json:"user"`
-	Host      string `json:"host"`
-	capture   bool
-	stdout    string
-	stderr    string
-	port      int
-	RemoteDir string `json:"remotedir"`
-	silent    bool
-	exitCode  int
-	ccmode    CrossCopyModeType
+	Key            string `json:"key"`
+	User           string `json:"user"`
+	Host           string `json:"host"`
+	capture        bool
+	stdout         string
+	stderr         string
+	port           int
+	RemoteDir      string `json:"remotedir"`
+	silent         bool
+	exitCode       int
+	ccmode         CrossCopyModeType
+	ConnectTimeout int `json:"connettimeout"` //ssh -o ConnectTimeout=10
 }
 
 const (
@@ -69,8 +71,16 @@ const (
 	SSH_DEFAULT_KEY = "~/.ssh/id_rsa"
 )
 
+func (s SSHStruct) GetSSHOptionsAsString() string {
+	//does not work as expected, always leave the options blank for now
+	// if s.ConnectTimeout != 0 {
+	// 	return fmt.Sprintf("-o ConnectTimeout=%d ", s.ConnectTimeout)
+	// }
+	return ""
+}
+
 func (s SSHStruct) GetSSHCli() string {
-	return "ssh -i " + s.Key + " " + s.User + "@" + s.Host
+	return fmt.Sprintf("ssh %s-i %s %s@%s", s.GetSSHOptionsAsString(), s.Key, s.User, s.Host)
 }
 
 func (s SSHStruct) parseSSHKey() (ssh.Signer, error) {
@@ -84,24 +94,34 @@ func (s SSHStruct) parseSSHKey() (ssh.Signer, error) {
 	return ssh.ParsePrivateKey(keyBytes)
 }
 
-func (s SSHStruct) SecureDownload(remoteFilePath string, localFilePath string) error {
-	// Parse the private key
+func (s *SSHStruct) CreateClientConfig() ssh.ClientConfig {
+	var err error
 	privateKey, err := s.parseSSHKey()
 	if err != nil {
-		return err
+		panic(err.Error())
+		//return ssh.ClientConfig{}
 	}
-
-	// Create an SSH client configuration
-	config := &ssh.ClientConfig{
+	if s.ConnectTimeout == 0 {
+		s.ConnectTimeout = ssh_default_connection_timeout
+	}
+	return ssh.ClientConfig{
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		User:            s.User,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(privateKey),
-		},
-	}
+		}}
+	//,
+	//Timeout: time.Duration(s.ConnectTimeout)}
+}
+
+func (s SSHStruct) SecureDownload(remoteFilePath string, localFilePath string) error {
+	// Parse the private key
+
+	// Create an SSH client configuration
+	config := s.CreateClientConfig()
 
 	// Connect to the remote host
-	sshClient, err := ssh.Dial("tcp", s.Host+":22", config)
+	sshClient, err := ssh.Dial("tcp", s.Host+":22", &config)
 	if err != nil {
 		return err
 	}
@@ -144,12 +164,12 @@ func (s *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string) e
 	// 	return err
 	// }
 	// Parse the private key
-	privateKey, err := s.parseSSHKey()
+	//privateKey, err := s.parseSSHKey()
 	// ..ParsePrivateKey(keyBytes)
-	if err != nil {
-		VerbosePrintln("ssh parse error")
-		return err
-	}
+	// if err != nil {
+	// 	VerbosePrintln("ssh parse error")
+	// 	return err
+	// }
 	VerbosePrintf("checking %s for existance...", remoteFilePath)
 	if !s.RemoteFileExists(remoteFilePath) {
 		VerbosePrintln("\tdoes not exist, touch it")
@@ -163,17 +183,11 @@ func (s *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string) e
 	VerbosePrintln("build ssh object")
 
 	// Create an SSH client configuration
-	config := &ssh.ClientConfig{
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		User:            s.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(privateKey),
-		},
-	}
+	config := s.CreateClientConfig()
 	VerbosePrintf("dialing ssh with cli: %s", s.GetSSHCli())
 
 	// Connect to the remote host
-	sshClient, err := ssh.Dial("tcp", s.Host+":22", config)
+	sshClient, err := ssh.Dial("tcp", s.Host+":22", &config)
 	if err != nil {
 		return err
 	}
@@ -225,23 +239,17 @@ func (s SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) err
 	// }
 
 	// Parse the private key
-	privateKey, err := s.parseSSHKey()
-	//privateKey, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil {
-		return err
-	}
+	// privateKey, err := s.parseSSHKey()
+	// //privateKey, err := ssh.ParsePrivateKey(keyBytes)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// Create an SSH client configuration
-	config := &ssh.ClientConfig{
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		User:            s.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(privateKey),
-		},
-	}
+	config := s.CreateClientConfig()
 
 	// Connect to the remote host
-	sshClient, err := ssh.Dial("tcp", s.Host+":22", config)
+	sshClient, err := ssh.Dial("tcp", s.Host+":22", &config)
 	if err != nil {
 		return err
 	}
@@ -361,7 +369,7 @@ func (s *SSHStruct) SecureRemoteExecution(cli string) error {
 	// Replace with your remote server's SSH configuration
 	if len(s.Host) == 0 {
 		//		log.Fatalln("missing host")
-		panic("SecureRemoteExecution::missing host")
+		return fmt.Errorf("SSHStruct::SecureRemoteExecution::missing host")
 	}
 
 	// Read the private key
@@ -372,25 +380,19 @@ func (s *SSHStruct) SecureRemoteExecution(cli string) error {
 
 	// Parse the private key
 	//	signer, err := ssh.ParsePrivateKey(keyBytes)
-	signer, err := s.parseSSHKey()
-	if err != nil {
-		log.Fatalf("Failed to parse private key: %v", err)
-	}
+	// signer, err := s.parseSSHKey()
+	// if err != nil {
+	// 	log.Fatalf("Failed to parse private key: %v", err)
+	// }
 
-	config := &ssh.ClientConfig{
-		User: s.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
+	config := s.CreateClientConfig()
 
 	VerbosePrintln(s.GetSSHCli() + " \"" + cli + "\"")
 
 	// Connect to the remote server
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", s.Host, s.port), config)
+	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", s.Host, s.port), &config)
 	if err != nil {
-		log.Fatalf("Failed to dial: %v", err)
+		return fmt.Errorf("Failed to dial: %v", err)
 	}
 	defer conn.Close()
 
@@ -404,7 +406,7 @@ func (s *SSHStruct) SecureRemoteExecution(cli string) error {
 		cli = "cd " + s.RemoteDir + " && " + cli
 	}
 	if err != nil {
-		log.Fatalf("Failed to create session: %v", err)
+		return fmt.Errorf("failed to create session: %v", err)
 	}
 	defer session.Close()
 
@@ -526,6 +528,9 @@ func (s SSHStruct) DownloadCLI(src string, tgt string) string {
 // return false on error or file doesn't exist (easy mode)
 func (s SSHStruct) RemoteFileExists(path string) bool {
 	err := s.SecureRemoteExecution("test -e " + path)
+	if err != nil && strings.Contains(err.Error(), "i/o timeout") {
+		fmt.Printf("WARNING: ssh connection timed out after %d sec(s)\n", s.ConnectTimeout)
+	}
 	return err == nil
 }
 
@@ -609,23 +614,17 @@ func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error 
 	VerbosePrintln("parsing key, in memory")
 	// Parse the private key
 	//privateKey, err := ssh.ParsePrivateKey(keyBytes)
-	privateKey, err := s.parseSSHKey()
-	if err != nil {
-		return err
-	}
+	// privateKey, err := s.parseSSHKey()
+	// if err != nil {
+	// 	return err
+	// }
 
 	VerbosePrintln("creating ssh config")
-	config := &ssh.ClientConfig{
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		User:            s.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(privateKey),
-		},
-	}
+	config := s.CreateClientConfig()
 
 	VerbosePrintln("ssh dial up to " + s.Host + ":22")
 	// Connect to the remote host
-	sshClient, err := ssh.Dial("tcp", s.Host+":22", config)
+	sshClient, err := ssh.Dial("tcp", s.Host+":22", &config)
 	if err != nil {
 		return err
 	}
@@ -852,4 +851,64 @@ func (s *SSHStruct) SecureUploadContent2(content []byte, remoteFilePath string) 
 
 	VerbosePrintln("END SecureUploadContent2()")
 	return nil
+}
+
+func (s *SSHStruct) RemotePopenGrep(cli string, musthave string, mustnothave string) ([]string, error) {
+	VerbosePrintf("BEGIN RemotePopenGrep(%s,%s,%s)", cli, musthave, mustnothave)
+	var mh, mnh string
+	if len(musthave) > 0 {
+		mh = fmt.Sprintf(" | grep %s", musthave)
+	}
+	if len(mustnothave) > 0 {
+		mnh = fmt.Sprintf(" | grep -v %s", mustnothave)
+	}
+	VerbosePrintf("\tcli: %s", s.GetSSHCli())
+	if err := s.SecureRemoteExecution(fmt.Sprintf("%s%s%s", cli, mh, mnh)); err != nil {
+		return []string{}, err
+	}
+	VerbosePrintf("END RemotePopenGrep(%s,%s,%s)", cli, musthave, mustnothave)
+	return strings.Split(strings.TrimSpace(s.GetBody()), "\n"), nil
+}
+
+func (s *SSHStruct) RemoteJPS() ([]string, error) {
+	return s.RemotePopenGrep("ps aux", "java", "grep")
+}
+
+const pid_status_format = "/proc/%d/status"
+const pid_cmdline_format = "/proc/%d/cmdline"
+
+func (s SSHStruct) RemoteGetThreadCount(pid int) (int, error) {
+	if pid == -1 {
+		return 0, nil
+	}
+	if err := s.RemoteReadFile(fmt.Sprintf(pid_status_format, pid)); err != nil {
+		return 0, err
+	}
+	return ParseThreadCount(s.GetBody())
+}
+
+func (s SSHStruct) RemoteGetArgsFromPid(pid int) ([]string, error) {
+	if pid == -1 {
+		return []string{}, nil
+	}
+	if err := s.RemoteReadFile(fmt.Sprintf(pid_cmdline_format, pid)); err != nil {
+		return []string{}, err
+	}
+	return strings.Split(s.GetBody(), "\x00"), nil
+}
+
+func (s SSHStruct) RemoteCapturePid(jvm string, hint string) (int, error) {
+	VerbosePrintln("inside CapturePid(" + jvm + ")")
+	lines, err := s.RemoteJPS()
+	if err != nil {
+		return 0, err
+	}
+	jlist := JPSStructListToIntList(SlicetoJPSStruct(lines, hint), jvm)
+	if len(jlist) == 0 {
+		return 0, fmt.Errorf(no_processes_found)
+	}
+	if len(jlist) > 1 {
+		return jlist[0], fmt.Errorf("multiple processes found, returning first")
+	}
+	return jlist[0], nil
 }
