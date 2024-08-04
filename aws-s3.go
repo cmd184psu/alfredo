@@ -535,7 +535,7 @@ func (s3s S3ClientSession) ListBuckets() []string {
 		VerbosePrintf("(3) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
 		panic(err.Error())
 	}
-	VerbosePrintf("resulting bucket list has %s elements", len(result.Buckets))
+	VerbosePrintf("resulting bucket list has %d elements", len(result.Buckets))
 	for _, bucket := range result.Buckets {
 		returnVal = append(returnVal, *bucket.Name)
 	}

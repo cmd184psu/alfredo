@@ -2,6 +2,7 @@ package alfredo
 
 import (
 	"crypto/md5"
+	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -377,4 +378,61 @@ func GetClassName(fields []string) string {
 func GetClassNameLastSegment(className string) string {
 	segments := strings.Split(className, ".")
 	return segments[len(segments)-1]
+}
+
+type BoolMapContainer struct {
+	bmc map[string]bool
+}
+
+func (m *BoolMapContainer) FromCSV(itemsCSV string, s bool) {
+	if len(itemsCSV) == 0 {
+		return
+	}
+
+	reader := csv.NewReader(strings.NewReader(itemsCSV))
+	records, _ := reader.ReadAll()
+
+	if len(records) == 0 || len(records[0]) == 0 {
+		return
+	}
+
+	for _, item := range records[0] {
+		if s {
+			m.Enable(item)
+		} else {
+			delete(m.bmc, item)
+		}
+	}
+}
+
+func (m *BoolMapContainer) EnableItems(itemsCSV string) {
+	m.FromCSV(itemsCSV, true)
+}
+func (m *BoolMapContainer) DisableItems(itemsCSV string) {
+	m.FromCSV(itemsCSV, false)
+}
+func (m BoolMapContainer) IsEnabled(key string) bool {
+	value, exists := m.bmc[key]
+	return exists && value
+}
+func (m *BoolMapContainer) Enable(key string) {
+	if len(key) > 0 {
+		m.bmc[key] = true
+	}
+}
+func (m *BoolMapContainer) Disable(key string) {
+	delete(m.bmc, key)
+}
+
+func (m BoolMapContainer) ToSlice() []string {
+	var enabledItems []string
+	for key, value := range m.bmc {
+		if value {
+			enabledItems = append(enabledItems, key)
+		}
+	}
+	return enabledItems
+}
+func (m BoolMapContainer) ToCSV() string {
+	return strings.Join(m.ToSlice(), ",")
 }
