@@ -831,3 +831,52 @@ func GetArgsFromPid(pid int) ([]string, error) {
 	}
 	return strings.Split(string(cmdlineBytes), "\x00"), nil
 }
+
+func LoadCredFileMap(filename string) (map[string]string, error) {
+	if !FileExistsEasy(filename) {
+		return map[string]string{}, nil
+	}
+	credentials := make(map[string]string)
+
+	// Open the file
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the file line by line
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Split the line into user and password
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid line: %s", line)
+		}
+
+		// Trim whitespace around the user and password
+		user := strings.TrimSpace(parts[0])
+		password := strings.TrimSpace(parts[1])
+
+		// Store the user and password in the map
+		credentials[user] = password
+	}
+
+	// Check for scanning errors
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return credentials, nil
+}
+
+func FileAuthenticate(username, password, filename string) bool {
+	credmap, err := LoadCredFileMap(filename)
+
+	if err != nil {
+		panic(err.Error())
+	}
+	return strings.EqualFold(credmap[username], password)
+}

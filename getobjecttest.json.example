@@ -1,0 +1,17 @@
+{
+  "s3creds": {
+    "accessKey": "--access example--",
+    "active": false,
+    "createDate": 0,
+    "expireDate": 0,
+    "secretKey": "--secret key example--",
+    "profile": ""
+  },
+  "bucket": "",
+  "endpoint": "https://s3-region.example.com",
+  "region": "region",
+  "key": "",
+  "Client": null,
+  "versioning": false,
+  "policyid": ""
+}

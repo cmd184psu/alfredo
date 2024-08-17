@@ -1,6 +1,6 @@
 module main
 
-go 1.21.0
+go 1.22.6
 
 replace github.com/cmd184psu/alfredo => ../
 

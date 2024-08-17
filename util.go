@@ -251,7 +251,7 @@ func (fns FilenameStruct) WithPath(p string) FilenameStruct {
 }
 
 // FileBaseContainsDate : f contains a date
-func fileBaseContainsDate(f string) bool {
+func FileBaseContainsDate(f string) bool {
 
 	if len(f) < 7 {
 		return false // shortcut, if base is less than 7, there's no date to look for
@@ -267,7 +267,7 @@ func fileBaseContainsDate(f string) bool {
 	for i := 0; i < len(datelist); i++ {
 		for j := 1; j < 13; j++ {
 			s := time.Month(j).String()
-			lhs := f[len(f)-7 : len(f)]
+			lhs := f[len(f)-7:]
 			rhs := s[0:3] + strconv.Itoa(datelist[i])
 			if lhs == rhs {
 				DebugPrintf("# found match - returning true: %s", lhs)
@@ -313,7 +313,7 @@ func (fns *FilenameStruct) Parse(f string) error {
 
 	fns.path = filepath.Dir(fns.fullname)
 
-	fns.hasDate = fileBaseContainsDate(fns.base)
+	fns.hasDate = FileBaseContainsDate(fns.base)
 
 	//debugPrint("=====>filename " + f + " has date: " + strconv.FormatBool(fns.hasDate))
 

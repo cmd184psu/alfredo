@@ -289,9 +289,9 @@ func TestSSHStruct_WriteSparseFile(t *testing.T) {
 // 				Host: "builder.cmdhome.net",
 // 			},
 // 			args: args{
-// 				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+// 				srcFile: "",
 // 				tgtssh:  sshtgt,
-// 				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+// 				tgtFile: "",
 // 			},
 // 		},
 // 	}
@@ -355,9 +355,9 @@ func TestSSHStruct_CrossCopy(t *testing.T) {
 				ccmode: GetCCTypeOf("temp"),
 			},
 			args: args{
-				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				srcFile: "",
 				tgtssh:  sshtgt,
-				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				tgtFile: "",
 			},
 		},
 		{
@@ -369,9 +369,9 @@ func TestSSHStruct_CrossCopy(t *testing.T) {
 				ccmode: CCMVIASHELL,
 			},
 			args: args{
-				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				srcFile: "",
 				tgtssh:  sshtgt,
-				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				tgtFile: "",
 			},
 		},
 		{
@@ -383,9 +383,9 @@ func TestSSHStruct_CrossCopy(t *testing.T) {
 				ccmode: CCMVIAMEMORY,
 			},
 			args: args{
-				srcFile: "/home/cdelezenski/rpmbuild/RPMS/x86_64/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				srcFile: "",
 				tgtssh:  sshtgt,
-				tgtFile: "/root/cloudian-bucket-migrator-1.2.2-1.x86_64.rpm",
+				tgtFile: "",
 			},
 		},
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -27,18 +26,14 @@ func TestS3ClientSession_ListObjectsWithPrefix(t *testing.T) {
 		prefix string
 	}
 	var s3c S3ClientSession
-	s3c.Credentials.AccessKey = "00cf16ab0700cea0f1cb"
-	s3c.Credentials.SecretKey = "9Z93vqGuVwtDGFKNa440K4Ptb1VDFRNHe2bFnMi+"
-	s3c.Endpoint = "https://s3-support.cloudian.com"
-	s3c.Region = "region"
+	s3c.Load("getobjecttest.json")
 	if err := s3c.EstablishSession(); err != nil {
 		t.Error("failed to establish S3 session")
 		t.Errorf("error=%s\n", err.Error())
 		os.Exit(1)
 	}
 	var wanted []string
-	wanted = append(wanted, "10May2024-tgt/nasunifilere18e74f0-5c04-498a-8f73-90ef5d659d7e-2-0.CLOUDIAN_METADATA.1.log")
-	//endpoint = s3-support.cloudian.com
+	//	wanted = append(wanted, "")
 
 	tests := []struct {
 		name    string
@@ -47,20 +42,12 @@ func TestS3ClientSession_ListObjectsWithPrefix(t *testing.T) {
 		want    []string
 		wantErr bool
 	}{
-
-		// 		aws_access_key_id = 00cf16ab0700cea0f1cb
-		// aws_secret_access_key = 9Z93vqGuVwtDGFKNa440K4Ptb1VDFRNHe2bFnMi+
-		// endpoint = s3-support.cloudian.com
-
 		{
 			name: "base test",
 			fields: fields{
 				Credentials: s3c.Credentials,
-				Bucket:      "purity-20161205",
-				Region:      "region",
 				established: true,
 				Client:      s3c.Client,
-				Endpoint:    "s3-support.cloudian.com",
 			},
 			args: args{
 				prefix: "10May2024-tgt/",
@@ -97,59 +84,6 @@ func TestS3ClientSession_ListObjectsWithPrefix(t *testing.T) {
 	}
 }
 
-func TestS3ClientSession_LoadUserCredentialsForProfile(t *testing.T) {
-	type fields struct {
-		Credentials S3credStruct
-		Bucket      string
-		Endpoint    string
-		Region      string
-		Client      *s3.S3
-		Versioning  bool
-		established bool
-		keepBucket  bool
-		PolicyId    string
-		Profile     string
-	}
-
-	tests := []struct {
-		name    string
-		fields  fields
-		wantErr bool
-	}{
-		{
-			name: "base test",
-			fields: fields{
-				Profile: "cit",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s3c := S3ClientSession{
-				Credentials: tt.fields.Credentials,
-				Bucket:      tt.fields.Bucket,
-				Endpoint:    tt.fields.Endpoint,
-				Region:      tt.fields.Region,
-				Client:      tt.fields.Client,
-				Versioning:  tt.fields.Versioning,
-				established: tt.fields.established,
-				keepBucket:  tt.fields.keepBucket,
-				PolicyId:    tt.fields.PolicyId,
-			}
-			s3c.Credentials.Profile = tt.fields.Profile
-			if err := s3c.LoadUserCredentialsForProfile(); (err != nil) != tt.wantErr {
-				t.Errorf("S3ClientSession.LoadUserCredentialsForProfile() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !strings.EqualFold(s3c.Credentials.AccessKey, "7ded71cfd9a190f8b365") ||
-				!strings.EqualFold(s3c.Credentials.SecretKey, "UB6qSYPFYMf3EY3tXqh7BAhD1K4i0TKcAu5mSzea") {
-				t.Errorf("incorrect credentials loaded")
-				t.Errorf("ak=%s", s3c.Credentials.AccessKey)
-				t.Errorf("sk=%s", s3c.Credentials.SecretKey)
-			}
-		})
-	}
-}
-
 func TestS3ClientSession_PresignedURL(t *testing.T) {
 	type fields struct {
 		Credentials S3credStruct
@@ -168,10 +102,7 @@ func TestS3ClientSession_PresignedURL(t *testing.T) {
 		expiredHours int
 	}
 	var s3c S3ClientSession
-	s3c.Credentials.AccessKey = "00cf16ab0700cea0f1cb"
-	s3c.Credentials.SecretKey = "9Z93vqGuVwtDGFKNa440K4Ptb1VDFRNHe2bFnMi+"
-	s3c.Endpoint = "https://s3-support.cloudian.com"
-	s3c.Region = "region"
+	s3c.Load("getobjecttest.json")
 	if err := s3c.EstablishSession(); err != nil {
 		t.Error("failed to establish S3 session")
 		t.Errorf("error=%s\n", err.Error())
@@ -193,7 +124,6 @@ func TestS3ClientSession_PresignedURL(t *testing.T) {
 				Region:      "region",
 				established: true,
 				Client:      s3c.Client,
-				Endpoint:    "s3-support.cloudian.com",
 				ObjectKey:   "10May2024-tgt/nasunifilere18e74f0-5c04-498a-8f73-90ef5d659d7e-2-0.CLOUDIAN_METADATA.1.log",
 			},
 
@@ -205,18 +135,19 @@ func TestS3ClientSession_PresignedURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s3c := &S3ClientSession{
-				Credentials: tt.fields.Credentials,
-				Bucket:      tt.fields.Bucket,
-				ObjectKey:   tt.fields.ObjectKey,
-				Endpoint:    tt.fields.Endpoint,
-				Region:      tt.fields.Region,
-				Client:      tt.fields.Client,
-				Versioning:  tt.fields.Versioning,
-				established: tt.fields.established,
-				keepBucket:  tt.fields.keepBucket,
-				PolicyId:    tt.fields.PolicyId,
-			}
+			// s3c := &S3ClientSession{
+			// 	Credentials: tt.fields.Credentials,
+			// 	Bucket:      tt.fields.Bucket,
+			// 	ObjectKey:   tt.fields.ObjectKey,
+			// 	Endpoint:    tt.fields.Endpoint,
+			// 	Region:      tt.fields.Region,
+			// 	Client:      tt.fields.Client,
+			// 	Versioning:  tt.fields.Versioning,
+			// 	established: tt.fields.established,
+			// 	keepBucket:  tt.fields.keepBucket,
+			// 	PolicyId:    tt.fields.PolicyId,
+			// }
+			s3c.Load("getobjecttest.json")
 			got, err := s3c.PresignedURL(tt.args.expiredHours)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("S3ClientSession.PresignedURL() error = %v, wantErr %v", err, tt.wantErr)
@@ -245,10 +176,7 @@ func TestS3ClientSession_GetObjectHash(t *testing.T) {
 		ObjectKey   string
 	}
 	var s3c S3ClientSession
-	s3c.Credentials.AccessKey = "00cf16ab0700cea0f1cb"
-	s3c.Credentials.SecretKey = "9Z93vqGuVwtDGFKNa440K4Ptb1VDFRNHe2bFnMi+"
-	s3c.Endpoint = "https://s3-support.cloudian.com"
-	s3c.Region = "region"
+	s3c.Load("getobjecttest.json")
 	if err := s3c.EstablishSession(); err != nil {
 		t.Error("failed to establish S3 session")
 		t.Errorf("error=%s\n", err.Error())
@@ -265,12 +193,8 @@ func TestS3ClientSession_GetObjectHash(t *testing.T) {
 			name: "base test",
 			fields: fields{
 				Credentials: s3c.Credentials,
-				Bucket:      "purity-20161205",
-				Region:      "region",
 				established: true,
 				Client:      s3c.Client,
-				Endpoint:    "s3-support.cloudian.com",
-				ObjectKey:   "10May2024-tgt/nasunifilere18e74f0-5c04-498a-8f73-90ef5d659d7e-2-0.CLOUDIAN_METADATA.1.log",
 			},
 		},
 	}
@@ -356,4 +280,45 @@ func TestS3ClientSession_ParseFromURL(t *testing.T) {
 
 		})
 	}
+}
+
+func TestS3ClientSession_RecursiveBucketDeleteAlt(t *testing.T) {
+	// type fields struct {
+	// 	Credentials S3credStruct
+	// 	Bucket      string
+	// 	Endpoint    string
+	// 	Region      string
+	// 	ObjectKey   string
+	// 	Client      *s3.S3
+	// 	Versioning  bool
+	// 	established bool
+	// 	keepBucket  bool
+	// 	PolicyId    string
+	// }
+	// tests := []struct {
+	// 	name    string
+	// 	fields  fields
+	// 	wantErr bool
+	// }{
+	// 	// TODO: Add test cases.
+	// }
+	// for _, tt := range tests {
+	// 	t.Run(tt.name, func(t *testing.T) {
+	// 		s3c := S3ClientSession{
+	// 			Credentials: tt.fields.Credentials,
+	// 			Bucket:      tt.fields.Bucket,
+	// 			Endpoint:    tt.fields.Endpoint,
+	// 			Region:      tt.fields.Region,
+	// 			ObjectKey:   tt.fields.ObjectKey,
+	// 			Client:      tt.fields.Client,
+	// 			Versioning:  tt.fields.Versioning,
+	// 			established: tt.fields.established,
+	// 			keepBucket:  tt.fields.keepBucket,
+	// 			PolicyId:    tt.fields.PolicyId,
+	// 		}
+	// 		if err := s3c.RecursiveBucketDeleteAlt(); (err != nil) != tt.wantErr {
+	// 			t.Errorf("S3ClientSession.RecursiveBucketDeleteAlt() error = %v, wantErr %v", err, tt.wantErr)
+	// 		}
+	// 	})
+	// }
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -469,6 +470,40 @@ func (this S3ClientSession) RecursiveBucketDelete() error {
 	return err
 }
 
+func (s3c S3ClientSession) RecursiveBucketDeleteAlt() error {
+	VerbosePrintln("BEGIN: RecursiveBucketDelete()")
+
+	// Get the list of objects in the bucket
+	objects, err := s3c.Client.ListObjectsV2(&s3.ListObjectsV2Input{
+		Bucket: aws.String(s3c.Bucket),
+	})
+	if err != nil {
+		return err
+	}
+
+	// Delete each object recursively
+	for _, obj := range objects.Contents {
+		key := *obj.Key
+		VerbosePrintf("Deleting %s\n", key)
+		_, err = s3c.Client.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(s3c.Bucket),
+			Key:    obj.Key,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete the bucket if it is empty
+	if len(objects.Contents) == 0 {
+		_, err = s3c.Client.DeleteBucket(&s3.DeleteBucketInput{
+			Bucket: aws.String(s3c.Bucket),
+		})
+	}
+
+	return err
+}
+
 func (s3c S3credStruct) CredentialsStanza() string {
 	return fmt.Sprintf("[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n\n",
 		s3c.Profile,
@@ -531,10 +566,6 @@ func (s3s S3ClientSession) ListBuckets() []string {
 	}
 
 	var returnVal []string
-	if err != nil {
-		VerbosePrintf("(3) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
-		panic(err.Error())
-	}
 	VerbosePrintf("resulting bucket list has %d elements", len(result.Buckets))
 	for _, bucket := range result.Buckets {
 		returnVal = append(returnVal, *bucket.Name)
@@ -728,4 +759,23 @@ func (s3c *S3ClientSession) ParseFromURL(url string) error {
 
 func (s3c *S3ClientSession) GetURL() string {
 	return fmt.Sprintf("s3://%s/%s", s3c.Bucket, s3c.ObjectKey)
+}
+
+func (s3c *S3ClientSession) Load(filename string) error {
+	if FileExistsEasy(filename) {
+		if err := ReadStructFromJSONFile(filename, &s3c); err != nil {
+			return err
+		}
+	} else {
+		jsonContent := "[]"
+		json.Unmarshal([]byte(jsonContent), &s3c)
+	}
+	return nil
+}
+
+func (s3c S3ClientSession) Save(filename string) error {
+	if err := WriteStructToJSONFile(filename, s3c); err != nil {
+		return err
+	}
+	return nil
 }
