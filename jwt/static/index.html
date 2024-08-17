@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JWT Sample Application Login</title>
+    <!-- <link rel="stylesheet" href="loginstyle.css">  -->
+    <link rel="stylesheet" href="style.css"> 
+</head>
+<body>
+    <div class="base-app-style">
+        <div id="header" class="header" style="display:none" >
+            <button id="logoutBtn">Log Out</button>
+        </div>
+            <!-- login panel -->
+        <div id="loginContainer"  class="loginContainer">
+            <div style="position: absolute; top: 65px; left: 65px;">
+                <img src="logo.svg" alt="Logo" width="100%">
+            </div>
+
+            <form id="loginForm">
+                <div class="loginRow">
+                    <label class="loginLabel">Username</label>
+                    <input type="text" class="margeTextInput" id="username">
+                </div>
+                <div class="loginRow">
+                    <!-- <input type="password" class="margeTextInput" id="password"> -->
+
+
+                   <div class="password-wrapper">
+                    <label class="loginLabel">Password</label>
+                    <input type="password" class="margeTextInput" id="password">
+                    <span id="toggle-password" onclick="togglePasswordVisibility()" class="toggle-password">
+                            <i class="eye-icon">👁️</i>
+                        </span>
+                    </div>
+<!-- 
+                    <input type="password" name="" id="password" required="" class="margeTextInput" />
+                    <span class="password-toggle-icon"><i class="fas fa-eye"></i></span> -->
+
+                </div>
+                <div id="loginButtonRow">
+                    <input id="loginBtn" type="submit" value="Log In" class="button">
+                </div>
+            </form>
+
+            <div id="productName">
+                <div>JWT Sample Application</div>
+            </div>
+        </div>
+        <!-- content panel -->
+        <div id="dataContainer" style="display:none" class="data-container">
+            <h2>Sample Data</h2>
+            <table id="dataTable" border="1">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div id="footer" class="footer">
+            <a href="http://www.google.com/" target="_blank">Open documentation</a>
+            <div style="float: right;"></div>
+        </div>
+    </div>
+    <script>
+        let token = localStorage.getItem('token');
+
+        function showLoginForm() {
+            document.getElementById('header').style.display = 'none';
+            document.getElementById('loginContainer').style.display = 'block';
+            document.getElementById('dataContainer').style.display = 'none';
+            document.getElementById('logoutBtn').style.display = 'none';
+        }
+
+        function showData() {
+            console.log("showdata(1)")
+            document.getElementById('header').style.display = 'block';
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('dataContainer').style.display = 'block';
+            document.getElementById('logoutBtn').style.display = 'block';
+            fetchData();
+            console.log("showdata(2)")
+        }
+
+        function login() {
+            console.log("login:: get here")
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            fetch('/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username, password }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                token = data.token;
+                localStorage.setItem('token', token);
+                showData();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Login failed');
+            });
+
+            console.log("login:: get here2 ")
+
+        }
+
+        function logout() {
+            fetch('/logout', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            })
+            .then(() => {
+                localStorage.removeItem('token');
+                token = null;
+                showLoginForm();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+
+        function fetchData() {
+            fetch('/data', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            })
+            .then(response => response.json())
+            .then(data => {
+                const tableBody = document.querySelector('#dataTable tbody');
+                tableBody.innerHTML = '';
+                data.forEach(item => {
+                    const row = tableBody.insertRow();
+                    row.insertCell(0).textContent = item.id;
+                    row.insertCell(1).textContent = item.name;
+                    row.insertCell(2).textContent = item.value;
+                });
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                if (error.message === 'Unauthorized') {
+                    //showLoginForm();
+                    logout()
+                }
+            });
+        }
+
+        document.getElementById('loginBtn').addEventListener('click', login);
+        document.getElementById('logoutBtn').addEventListener('click', logout);
+
+        if (token) {
+            showData();
+        } else {
+            //showLoginForm();
+            logout()
+        }
+
+        const passwordField = document.getElementById("password");
+        const togglePassword = document.querySelector(".password-toggle-icon i");
+        function togglePasswordVisibility() {
+        // togglePassword.addEventListener("click", function () {
+            if (passwordField.type === "password") {
+                passwordField.type = "text";
+                togglePassword.classList.remove("fa-eye");
+                togglePassword.classList.add("fa-eye-slash");
+            } else {
+                passwordField.type = "password";
+                togglePassword.classList.remove("fa-eye-slash");
+                togglePassword.classList.add("fa-eye");
+            }
+        // });
+        }
+    </script>
+
+</body>
+</html>
