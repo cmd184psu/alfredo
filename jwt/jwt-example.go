@@ -19,6 +19,7 @@ var jserver alfredo.JwtHttpsServerStruct
 func main() {
 	//initialize
 	jserver.Init(5443)
+	jserver.SetCertFiles("server.crt", "server.key")
 	//	jserver.AcquireKey("jwt.key")
 
 	//handlers

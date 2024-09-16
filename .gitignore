@@ -22,3 +22,12 @@ go.work
 
 *.url
 *.json
+*.crt
+*.key
+
+alfredo
+credentials
+
+._*
+localfile.dat
+yourfile.txt 

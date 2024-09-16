@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -320,4 +321,18 @@ func (fns *FilenameStruct) Parse(f string) error {
 	VerbosePrintf("alfredo::util.go::FilenameStruct::Parse(%s)=%s", f, fns.GetFullName())
 
 	return nil
+}
+
+func TestEndpoint(url string) bool {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
 }

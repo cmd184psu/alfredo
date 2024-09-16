@@ -71,15 +71,16 @@ type JwtHttpsServerStruct struct {
 	publickey  string
 	privatekey string
 	pathMap    map[string]bool
+	secure     bool
+	srv        *http.Server
 }
 
 func (jhs *JwtHttpsServerStruct) Init(port int) {
 	//Router = chi.NewRouter
-
+	jhs.secure = false
 	jhs.Router = chi.NewRouter()
 	jhs.Router.Use(middleware.Logger)
 
-	jhs.SetCertFiles("server.crt", "server.key")
 	jhs.SetKey([]byte(GenerateJWTKey()))
 	jhs.SetPort(port)
 
@@ -129,6 +130,7 @@ func (jhs JwtHttpsServerStruct) GetCertFiles() (string, string) {
 func (jhs *JwtHttpsServerStruct) SetCertFiles(priv, pub string) {
 	jhs.privatekey = priv
 	jhs.publickey = pub
+	jhs.secure = true
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -167,24 +169,40 @@ func (jhs *JwtHttpsServerStruct) StartServer() error {
 	if !jhs.pathMap[StaticRoute] {
 		jhs.Router.Handle(StaticRoute, http.FileServer(http.Dir(StaticDirRoute)))
 	}
+
+	var err error
 	// Load self-signed SSL certificate
-	cert, err := tls.LoadX509KeyPair(jhs.GetCertFiles())
-	if err != nil {
-		log.Fatal("Error loading SSL certificate: ", err)
-		return err
-	}
+	if jhs.secure {
+		cert, err := tls.LoadX509KeyPair(jhs.GetCertFiles())
+		if err != nil {
+			log.Fatal("Error loading SSL certificate: ", err)
+			return err
+		}
 
-	srv := &http.Server{
-		Addr:      fmt.Sprintf(":%d", jhs.GetPort()),
-		Handler:   jhs.Router,
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
-	}
+		jhs.srv = &http.Server{
+			Addr:      fmt.Sprintf(":%d", jhs.GetPort()),
+			Handler:   jhs.Router,
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+		}
+		log.Printf("--- SSL Enabled ---")
+		log.Printf("Starting SSL server on :%d", jhs.GetPort())
+		err = jhs.srv.ListenAndServeTLS("", "")
+		if err != nil {
+			log.Fatal("Server failed: ", err)
+			return err
+		}
+	} else {
 
-	log.Printf("Starting server on :%d", jhs.GetPort())
-	err = srv.ListenAndServeTLS("", "")
-	if err != nil {
-		log.Fatal("Server failed: ", err)
-		return err
+		jhs.srv = &http.Server{
+			Addr:    fmt.Sprintf(":%d", jhs.GetPort()),
+			Handler: jhs.Router,
+		}
+		log.Printf("Starting server on :%d", jhs.GetPort())
+		err = jhs.srv.ListenAndServe()
+		if err != nil {
+			log.Fatal("Server failed: ", err)
+			return err
+		}
 	}
 	return nil
 }

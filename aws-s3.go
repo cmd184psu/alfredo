@@ -292,11 +292,20 @@ func (s3c *S3ClientSession) CreateBucket() error {
 	var err error
 	VerbosePrintln(fmt.Sprintf("--- about to create bucket with policy: %q ---- ", s3c.PolicyId))
 	VerbosePrintln("CreateBucket()::::region is " + s3c.Region)
+	VerbosePrintf("bucket was %q", s3c.Bucket)
+	VerbosePrintf("creds: %q/%q", s3c.Credentials.AccessKey, s3c.Credentials.SecretKey)
+	VerbosePrintf("ep: %q", s3c.Endpoint)
 
 	if len(s3c.PolicyId) == 0 || strings.EqualFold(s3c.PolicyId, "default") {
-		_, err = s3c.Client.CreateBucket(&s3.CreateBucketInput{
+		VerbosePrintln("s3c.Client.CreateBucket()")
+		s3out, s3err := s3c.Client.CreateBucket(&s3.CreateBucketInput{
 			Bucket: aws.String(s3c.Bucket),
 		})
+
+		VerbosePrintf("::::output: %q", s3out.String())
+
+		err = s3err
+
 	} else {
 		return s3c.createBucketWithPolicy()
 	}
