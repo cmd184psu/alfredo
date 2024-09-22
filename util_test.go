@@ -11,7 +11,11 @@
 
 package alfredo
 
-import "testing"
+import (
+	"reflect"
+	"sort"
+	"testing"
+)
 
 func TestFileBaseContainsDate(t *testing.T) {
 	tests := []struct {
@@ -36,6 +40,82 @@ func TestFileBaseContainsDate(t *testing.T) {
 			result := FileBaseContainsDate(tt.filename)
 			if result != tt.expected {
 				t.Errorf("FileBaseContainsDate(%s) = %v; expected %v", tt.filename, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCompareMaps(t *testing.T) {
+	tests := []struct {
+		name     string
+		mapA     map[string]string
+		mapB     map[string]string
+		expected []string
+	}{
+		{
+			name: "Identical maps (1)",
+			mapA: map[string]string{"g:slegacyg1;u:slegacyu1,ak:00a9876ea429fd097ac5": "hJMULP9z/hIsTv4+HbFAXCey59j0fpheGZ+6aF2R",
+				"g:slegacyg2;u:slegacyu2,ak:0378ef942fb1b3baaf19": "FcaonXUuzHYSIyYMl88gkwTYbNN611vp5BrI+xjm"},
+			mapB: map[string]string{"g:slegacyg1;u:slegacyu1,ak:00a9876ea429fd097ac5": "hJMULP9z/hIsTv4+HbFAXCey59j0fpheGZ+6aF2R",
+				"g:slegacyg2;u:slegacyu2,ak:0378ef942fb1b3baaf19": "FcaonXUuzHYSIyYMl88gkwTYbNN611vp5BrI+xjm"},
+
+			expected: []string{},
+		},
+		{
+			name:     "Identical maps",
+			mapA:     map[string]string{"a": "1", "b": "2"},
+			mapB:     map[string]string{"a": "1", "b": "2"},
+			expected: []string{},
+		},
+		{
+			name:     "Different values",
+			mapA:     map[string]string{"a": "1", "b": "2"},
+			mapB:     map[string]string{"a": "1", "b": "3"},
+			expected: []string{"Difference at key 'b': A=2, B=3"},
+		},
+		{
+			name:     "Key in A not in B",
+			mapA:     map[string]string{"a": "1", "b": "2", "c": "3"},
+			mapB:     map[string]string{"a": "1", "b": "2"},
+			expected: []string{"Key 'c' found in A but not in B"},
+		},
+		{
+			name:     "Key in B not in A",
+			mapA:     map[string]string{"a": "1", "b": "2"},
+			mapB:     map[string]string{"a": "1", "b": "2", "c": "3"},
+			expected: []string{"Key 'c' found in B but not in A"},
+		},
+		{
+			name: "Multiple differences",
+			mapA: map[string]string{"a": "1", "b": "2", "c": "3", "d": "4"},
+			mapB: map[string]string{"a": "1", "b": "3", "d": "5", "e": "6"},
+			expected: []string{
+				"Difference at key 'b': A=2, B=3",
+				"Key 'c' found in A but not in B",
+				"Difference at key 'd': A=4, B=5",
+				"Key 'e' found in B but not in A",
+			},
+		},
+		{
+			name:     "Empty maps",
+			mapA:     map[string]string{},
+			mapB:     map[string]string{},
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CompareMaps(tt.mapA, tt.mapB)
+
+			// Sort the results and expected slices for consistent comparison
+			sort.Strings(result)
+			sort.Strings(tt.expected)
+
+			if len(result) != 0 || len(tt.expected) != 0 {
+				if !reflect.DeepEqual(result, tt.expected) {
+					t.Errorf("CompareMaps() = %v, want %v", result, tt.expected)
+				}
 			}
 		})
 	}

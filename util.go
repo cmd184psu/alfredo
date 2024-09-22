@@ -336,3 +336,25 @@ func TestEndpoint(url string) bool {
 
 	return resp.StatusCode == http.StatusOK
 }
+
+func CompareMaps(mapA, mapB map[string]string) []string {
+	var diff []string
+	// Iterate over mapA and compare with mapB
+	for key, valueA := range mapA {
+		if valueB, found := mapB[key]; found {
+			if valueA != valueB {
+				diff = append(diff, fmt.Sprintf("Difference at key '%s': A=%v, B=%v", key, valueA, valueB))
+			}
+		} else {
+			diff = append(diff, fmt.Sprintf("Key '%s' found in A but not in B", key))
+		}
+	}
+
+	// Check for keys in mapB that are not in mapA
+	for key := range mapB {
+		if _, found := mapA[key]; !found {
+			diff = append(diff, fmt.Sprintf("Key '%s' found in B but not in A", key))
+		}
+	}
+	return diff
+}
