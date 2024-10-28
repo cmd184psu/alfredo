@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -66,4 +67,26 @@ func (ts *TaskStruct) Init() {
 	ts.sigChan = make(chan os.Signal, 1)
 	signal.Notify(ts.sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+}
+
+// Concurrent executes the given function `f` concurrently `x` times and returns the results
+func Concurrent(f func(string) bool, remoteFile string, x int) []bool {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	results := make([]bool, x)
+
+	for i := 1; i <= x; i++ {
+		wg.Add(1)
+		go func(id int, remoteFile string) {
+			defer wg.Done()
+			result := f(remoteFile) // Call the passed function
+
+			mu.Lock()
+			results[id-1] = result // Store the result in the slice
+			mu.Unlock()
+		}(i, remoteFile)
+	}
+
+	wg.Wait() // Wait for all goroutines to finish
+	return results
 }

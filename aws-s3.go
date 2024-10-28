@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"gopkg.in/ini.v1"
 )
 
@@ -44,9 +45,17 @@ type S3ClientSession struct {
 	established bool
 	keepBucket  bool
 	PolicyId    string `json:"policyid"`
+	session     *session.Session
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
+
+func (s3c *S3ClientSession) SetSession(s *session.Session) {
+	s3c.session = s
+}
+func (s3c *S3ClientSession) GetSession() *session.Session {
+	return s3c.session
+}
 
 func (s3c *S3ClientSession) ClearEndpoint(sep string) {
 	s3c.Endpoint = ""
@@ -119,7 +128,8 @@ func (s3c *S3ClientSession) EstablishSession() error {
 	}
 
 	if len(s3c.Region) == 0 {
-		return errors.New("missing region")
+		panic("missing region")
+		//		return errors.New("missing region")
 	}
 
 	awsConfig := aws.NewConfig().
@@ -129,8 +139,8 @@ func (s3c *S3ClientSession) EstablishSession() error {
 		WithRegion(s3c.Region).
 		WithHTTPClient(&http.Client{Transport: ct})
 
-	sess := session.Must(session.NewSession(awsConfig))
-	s3c.Client = s3.New(sess)
+	s3c.SetSession(session.Must(session.NewSession(awsConfig)))
+	s3c.Client = s3.New(s3c.GetSession())
 	s3c.established = true
 	VerbosePrintln("END S3ClientSession::EstablishSession()")
 	return nil
@@ -786,5 +796,72 @@ func (s3c S3ClientSession) Save(filename string) error {
 	if err := WriteStructToJSONFile(filename, s3c); err != nil {
 		return err
 	}
+	return nil
+}
+
+// ProgressReader wraps an io.Reader and provides progress updates
+type ProgressReader struct {
+	io.Reader
+	Total    int64
+	Uploaded int64
+	Key      string
+}
+
+func (r *ProgressReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.Uploaded += int64(n)
+	progress := float64(r.Uploaded) / float64(r.Total) * 100
+	//	log.Printf("Uploading %s: %.2f%%", r.Key, progress)
+	fmt.Printf("\rUploading %s: %.2f%%", r.Key, progress)
+	return n, err
+}
+
+func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string) error {
+	uploader := s3manager.NewUploader(s3c.GetSession())
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open file %s: %v", path, err)
+		}
+		defer file.Close()
+
+		key, err := filepath.Rel(dirPath, path)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path: %v", err)
+		}
+
+		// Create a progress reader
+		progressReader := &ProgressReader{
+			Reader: file,
+			Total:  info.Size(),
+			Key:    key,
+		}
+
+		_, err = uploader.Upload(&s3manager.UploadInput{
+			Bucket: aws.String(s3c.Bucket),
+			Key:    aws.String(key),
+			Body:   progressReader,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to upload file %s: %v", path, err)
+		}
+
+		fmt.Printf("\nUploaded %s to s3://%s/%s\n", path, s3c.Bucket, key)
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("error walking the directory: %v", err)
+	}
+
 	return nil
 }

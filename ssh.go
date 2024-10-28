@@ -912,3 +912,53 @@ func (s SSHStruct) RemoteCapturePid(jvm string, hint string) (int, error) {
 	}
 	return jlist[0], nil
 }
+
+func (s SSHStruct) ReportHammerResults(results []bool, e error) error {
+	successCount := 0
+	failureCount := 0
+	failedTasks := []int{}
+
+	for i, success := range results {
+		if success {
+			successCount++
+		} else {
+			failureCount++
+			failedTasks = append(failedTasks, i)
+		}
+	}
+
+	fmt.Printf("Total tasks: %d\n", len(results))
+	fmt.Printf("Successful tasks: %d\n", successCount)
+	fmt.Printf("Failed tasks: %d\n", failureCount)
+
+	if len(failedTasks) > 0 {
+		fmt.Printf("Failed task IDs: %v\n", failedTasks)
+	}
+	return e
+}
+
+func (s SSHStruct) HammerTest() error {
+	if len(s.Key) == 0 {
+		return fmt.Errorf("missing ssh key")
+	}
+	if len(s.Host) == 0 {
+		return fmt.Errorf("missing ssh host")
+	}
+
+	x := 18 // Number of times to run the function concurrently
+	results := Concurrent(s.RemoteFileExists, "/bin/true", x)
+
+	// Display and analyze results
+	fmt.Println("Function results:", results)
+	successes := 0
+	failures := 0
+	for _, res := range results {
+		if res {
+			successes++
+		} else {
+			failures++
+		}
+	}
+	fmt.Printf("Successes: %d, Failures: %d\n", successes, failures)
+	return nil
+}

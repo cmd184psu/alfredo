@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -435,4 +436,19 @@ func (m BoolMapContainer) ToSlice() []string {
 }
 func (m BoolMapContainer) ToCSV() string {
 	return strings.Join(m.ToSlice(), ",")
+}
+
+func PrintSortedMap[K comparable, V any](m map[K]V) {
+	keys := make([]K, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+
+	sort.Slice(keys, func(i, j int) bool {
+		return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+	})
+
+	for _, k := range keys {
+		fmt.Printf("%v: %v\n", k, m[k])
+	}
 }

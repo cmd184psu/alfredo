@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ import (
 // the only global variable, Verbose is only used directly by the VerbosePrintln() function
 var verbose bool
 var force bool
-var debug bool
+var debugVar bool
 var panicOnFail bool
 var experimental bool
 
@@ -36,16 +37,16 @@ func SetVerbose(v bool) {
 	os.Setenv("VERBOSE", "1")
 }
 func GetVerbose() bool {
-	return getState("VERBOSE", verbose) || getState("DEBUG", debug)
+	return getState("VERBOSE", verbose) || getState("DEBUG", debugVar)
 }
 
 func SetDebug(b bool) {
-	debug = b
+	debugVar = b
 	os.Setenv("DEBUG", "1")
 }
 
 func GetDebug() bool {
-	return getState("DEBUG", debug)
+	return getState("DEBUG", debugVar)
 }
 func SetForce(f bool) {
 	force = f
@@ -357,4 +358,19 @@ func CompareMaps(mapA, mapB map[string]string) []string {
 		}
 	}
 	return diff
+}
+
+func TestHost(host string) error {
+	timeout := 5 * time.Second
+	start := time.Now()
+	conn, err := net.DialTimeout("ip4:icmp", host, timeout)
+	duration := time.Since(start)
+	if err != nil {
+		return fmt.Errorf("failed to ping %s: %v", host, err)
+	}
+	if conn != nil {
+		conn.Close()
+		fmt.Printf("Successfully pinged %s in %v\n", host, duration)
+	}
+	return nil
 }

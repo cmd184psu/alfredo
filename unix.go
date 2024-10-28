@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -879,4 +880,60 @@ func FileAuthenticate(username, password, filename string) bool {
 		panic(err.Error())
 	}
 	return strings.EqualFold(credmap[username], password)
+}
+
+func IsCgoEnabled() bool {
+	//	return !(runtime.GOOS != "js" && runtime.GOOS != "wasip1" && runtime.Compiler != "gccgo")
+
+	buildInfo, _ := debug.ReadBuildInfo()
+
+	for _, setting := range buildInfo.Settings {
+		if setting.Key == "CGO_ENABLED" {
+			if setting.Value == "1" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func GenerateFilename(f string, suffix string) FilenameStruct {
+	var fns FilenameStruct
+	fns.Parse(f)
+	if err := fns.GetStat(); err != nil {
+		panic(err.Error())
+	}
+	newFileBase := fns.GetBase() + suffix
+	if !fns.hasDate {
+		newFileBase += fns.GetModTime()
+	}
+	fns.SetBase(newFileBase)
+	fns.SetFullName(fmt.Sprintf("%s/%s%s", fns.GetPath(), fns.GetBase(), fns.GetExt()))
+	return fns
+}
+
+func GenerateMoveCLI(f string, suffix string) string {
+	fns := GenerateFilename(f, suffix)
+	return fmt.Sprintf("mv %s %s", f, fns.GetFullName())
+}
+
+func IsMounted(mntpt string) bool {
+	if !FileExistsEasy("/proc") {
+		panic("runtime error: OS does not support proc")
+	}
+	haystack, err := ReadFileToSlice("/proc/mounts", false)
+
+	if err != nil {
+		panic("runtime error: unable to read from /proc/mounts")
+	}
+
+	// SliceContains(slice, mntpt)
+	for _, h := range haystack {
+		if strings.Contains(h, mntpt) {
+			return true
+		}
+
+	}
+	return false
 }
