@@ -2,6 +2,7 @@ package alfredo
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/tls"
@@ -14,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -46,6 +49,7 @@ type S3ClientSession struct {
 	keepBucket  bool
 	PolicyId    string `json:"policyid"`
 	session     *session.Session
+	ctx         context.Context
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
@@ -752,6 +756,10 @@ func (s3c *S3ClientSession) HeadObject() (bool, error) {
 	return true, nil
 }
 
+func (s3c *S3ClientSession) GetS3Ptr() *s3.S3 {
+	return s3c.Client
+}
+
 func (s3c *S3ClientSession) ObjectExists() bool {
 	b, err := s3c.HeadObject()
 	if err != nil {
@@ -861,6 +869,304 @@ func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string) error {
 
 	if err != nil {
 		return fmt.Errorf("error walking the directory: %v", err)
+	}
+
+	return nil
+}
+
+const (
+	partSize       int64 = 5 * 1024 * 1024 // 5MB per part
+	maxConcurrency       = 10              // Maximum number of concurrent part uploads
+	maxRetries           = 3               // Maximum number of retries for failed operations
+	retryDelay           = 1 * time.Second // Delay between retries
+)
+
+type ProgressTracker struct {
+	TotalObjects     int64
+	CompletedObjects int64
+	TotalBytes       int64
+	CompletedBytes   int64
+	FailedObjects    map[string]error
+	mu               sync.Mutex
+}
+
+type CopyResult struct {
+	SourceKey   string
+	TargetKey   string
+	Success     bool
+	Error       error
+	BytesCopied int64
+	Duration    time.Duration
+}
+
+// type EndpointInfo struct {
+// 	Endpoint string
+// 	Region   string
+// 	Bucket   string
+// }
+
+func withRetry(operation func() error) error {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if err := operation(); err != nil {
+			lastErr = err
+			if aerr, ok := err.(awserr.Error); ok {
+				if aerr.Code() == "NoSuchKey" || aerr.Code() == "NoSuchBucket" {
+					return err
+				}
+			}
+			time.Sleep(retryDelay * time.Duration(i+1))
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("operation failed after %d retries: %v", maxRetries, lastErr)
+}
+
+// CopyAllObjects copies all objects between S3-compatible systems
+func (sourceS3 S3ClientSession) CopyAllObjects(
+	targetS3 *S3ClientSession,
+	progress *ProgressTracker,
+) error {
+	sourceS3.ctx = context.Background()
+	targetS3.ctx = context.Background()
+
+	progress.FailedObjects = make(map[string]error)
+
+	// Create worker pool for concurrent object copying
+	workerPool := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	resultsChan := make(chan CopyResult, maxConcurrency)
+
+	// Start result collector
+	go func() {
+		for result := range resultsChan {
+			if !result.Success {
+				progress.mu.Lock()
+				progress.FailedObjects[result.SourceKey] = result.Error
+				progress.mu.Unlock()
+			}
+			atomic.AddInt64(&progress.CompletedObjects, 1)
+		}
+	}()
+
+	// List all objects in source bucket
+	err := sourceS3.Client.ListObjectsV2PagesWithContext(sourceS3.ctx,
+		&s3.ListObjectsV2Input{
+			Bucket: aws.String(sourceS3.Bucket),
+		},
+		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+			for _, obj := range page.Contents {
+				atomic.AddInt64(&progress.TotalObjects, 1)
+				atomic.AddInt64(&progress.TotalBytes, *obj.Size)
+
+				key := *obj.Key
+				wg.Add(1)
+				go func(objectKey string) {
+					defer wg.Done()
+					workerPool <- struct{}{} // Acquire worker
+					defer func() {
+						<-workerPool // Release worker
+					}()
+
+					startTime := time.Now()
+					err := sourceS3.CopyObjectBetweenBuckets(targetS3,
+						objectKey, objectKey,
+						progress)
+
+					result := CopyResult{
+						SourceKey:   objectKey,
+						TargetKey:   objectKey,
+						Success:     err == nil,
+						Error:       err,
+						Duration:    time.Since(startTime),
+						BytesCopied: *obj.Size,
+					}
+
+					resultsChan <- result
+				}(key)
+			}
+			return !lastPage
+		})
+
+	if err != nil {
+		return fmt.Errorf("failed to list objects: %v", err)
+	}
+
+	wg.Wait()
+	close(resultsChan)
+
+	if len(progress.FailedObjects) > 0 {
+		return fmt.Errorf("some objects failed to copy. Check FailedObjects map for details")
+	}
+
+	return nil
+}
+
+// CopyObjectBetweenBuckets copies a single object between S3-compatible systems
+func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
+	targetS3 *S3ClientSession,
+	sourceKey string,
+	targetKey string,
+	progress *ProgressTracker,
+) error {
+	// Get source object details
+	var headOutput *s3.HeadObjectOutput
+	err := withRetry(func() error {
+		var err error
+		headOutput, err = sourceS3.Client.HeadObjectWithContext(sourceS3.ctx, &s3.HeadObjectInput{
+			Bucket: aws.String(sourceS3.Bucket),
+			Key:    aws.String(sourceKey),
+		})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get source object details: %v", err)
+	}
+
+	// For small files, use GET and PUT instead of COPY
+	if *headOutput.ContentLength < partSize {
+		// Get the object
+		getOutput, err := sourceS3.Client.GetObjectWithContext(sourceS3.ctx, &s3.GetObjectInput{
+			Bucket: aws.String(sourceS3.Bucket),
+			Key:    aws.String(sourceKey),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to get source object: %v", err)
+		}
+		defer getOutput.Body.Close()
+
+		body, err := io.ReadAll(getOutput.Body)
+		if err != nil {
+			return err
+		}
+		defer getOutput.Body.Close()
+
+		// Create an io.ReadSeeker from the byte slice
+		readSeeker := bytes.NewReader(body)
+
+		// Now you can use readSeeker where io.ReadSeeker is expected
+
+		// Put the object
+		_, err = targetS3.Client.PutObjectWithContext(sourceS3.ctx, &s3.PutObjectInput{
+			Bucket: aws.String(targetS3.Bucket),
+			Key:    aws.String(targetKey),
+			Body:   readSeeker,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to put object: %v", err)
+		}
+
+		atomic.AddInt64(&progress.CompletedBytes, *headOutput.ContentLength)
+		return nil
+	}
+
+	// For large files, use multipart upload with streaming
+	createOutput, err := targetS3.Client.CreateMultipartUploadWithContext(targetS3.ctx, &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(targetS3.Bucket),
+		Key:    aws.String(targetKey),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create multipart upload: %v", err)
+	}
+
+	totalParts := (*headOutput.ContentLength + partSize - 1) / partSize
+	parts := make([]*s3.CompletedPart, totalParts)
+	partsChan := make(chan int64, totalParts)
+	errorsChan := make(chan error, totalParts)
+	var uploadWg sync.WaitGroup
+
+	// Fill parts channel
+	for i := int64(1); i <= totalParts; i++ {
+		partsChan <- i
+	}
+	close(partsChan)
+
+	// Process parts concurrently
+	for i := 0; i < maxConcurrency; i++ {
+		uploadWg.Add(1)
+		go func() {
+			defer uploadWg.Done()
+
+			for partNumber := range partsChan {
+				startByte := (partNumber - 1) * partSize
+				endByte := startByte + partSize - 1
+				if endByte >= *headOutput.ContentLength {
+					endByte = *headOutput.ContentLength - 1
+				}
+
+				// Get the part from source
+				getPartOutput, err := sourceS3.Client.GetObjectWithContext(sourceS3.ctx, &s3.GetObjectInput{
+					Bucket: aws.String(sourceS3.Bucket),
+					Key:    aws.String(sourceKey),
+					Range:  aws.String(fmt.Sprintf("bytes=%d-%d", startByte, endByte)),
+				})
+				if err != nil {
+					errorsChan <- fmt.Errorf("failed to get part %d: %v", partNumber, err)
+					return
+				}
+				body, err := io.ReadAll(getPartOutput.Body)
+				if err != nil {
+					return
+				}
+				defer getPartOutput.Body.Close()
+
+				// Create an io.ReadSeeker from the byte slice
+				readSeeker := bytes.NewReader(body)
+
+				// Upload the part
+				uploadOutput, err := targetS3.Client.UploadPartWithContext(targetS3.ctx, &s3.UploadPartInput{
+					Bucket:     aws.String(targetS3.Bucket),
+					Key:        aws.String(targetKey),
+					PartNumber: aws.Int64(partNumber),
+					UploadId:   createOutput.UploadId,
+					Body:       readSeeker,
+				})
+				getPartOutput.Body.Close()
+
+				if err != nil {
+					errorsChan <- fmt.Errorf("failed to upload part %d: %v", partNumber, err)
+					return
+				}
+
+				parts[partNumber-1] = &s3.CompletedPart{
+					ETag:       uploadOutput.ETag,
+					PartNumber: aws.Int64(partNumber),
+				}
+
+				atomic.AddInt64(&progress.CompletedBytes, endByte-startByte+1)
+			}
+		}()
+	}
+
+	uploadWg.Wait()
+	close(errorsChan)
+
+	// Check for errors
+	for err := range errorsChan {
+		// Abort multipart upload
+		_, abortErr := targetS3.Client.AbortMultipartUploadWithContext(targetS3.ctx, &s3.AbortMultipartUploadInput{
+			Bucket:   aws.String(targetS3.Bucket),
+			Key:      aws.String(targetKey),
+			UploadId: createOutput.UploadId,
+		})
+		if abortErr != nil {
+			return fmt.Errorf("failed to abort multipart upload: %v (original error: %v)", abortErr, err)
+		}
+		return err
+	}
+
+	// Complete multipart upload
+	_, err = targetS3.Client.CompleteMultipartUploadWithContext(targetS3.ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(targetS3.Bucket),
+		Key:      aws.String(targetKey),
+		UploadId: createOutput.UploadId,
+		MultipartUpload: &s3.CompletedMultipartUpload{
+			Parts: parts,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to complete multipart upload: %v", err)
 	}
 
 	return nil
