@@ -50,6 +50,7 @@ type S3ClientSession struct {
 	PolicyId    string `json:"policyid"`
 	session     *session.Session
 	ctx         context.Context
+	forceSSL    bool
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
@@ -65,27 +66,20 @@ func (s3c *S3ClientSession) ClearEndpoint(sep string) {
 	s3c.Endpoint = ""
 }
 
+func (s3c *S3ClientSession) ForceSSL() {
+	s3c.forceSSL = true
+}
+func (s3c *S3ClientSession) DoNotForceSSL() {
+	s3c.forceSSL = false
+}
+
 func (s3c *S3ClientSession) SetEndpoint(sep string) {
 	if len(sep) == 0 {
 		panic("attempted to set endpoint to blank - use ClearEndpoint() instead")
 	}
 	s3c.Endpoint = sep
 
-	if !strings.HasPrefix(s3c.Endpoint, "http") {
-		s3c.Endpoint = "https://" + s3c.Endpoint
-	}
-
-	if strings.HasPrefix(s3c.Endpoint, "https://s3-") {
-		dotidx := strings.Index(s3c.Endpoint, ".")
-		s3c.Region = s3c.Endpoint[len("https://s3-"):dotidx]
-		VerbosePrintln("region=" + s3c.Region)
-	} else if strings.HasPrefix(s3c.Endpoint, "http://s3-") {
-		dotidx := strings.Index(s3c.Endpoint, ".")
-		s3c.Region = s3c.Endpoint[len("http://s3-"):dotidx]
-		VerbosePrintln("region=" + s3c.Region)
-	} else {
-		VerbosePrintln("endpoint is missing http[s]://s3-; ep is: " + s3c.Endpoint)
-	}
+	VerbosePrintf("!!! S3ClientSession::SetEndpoint(%s)", sep)
 }
 
 func (s3c S3ClientSession) WithEndpoint(sep string) S3ClientSession {
@@ -135,6 +129,8 @@ func (s3c *S3ClientSession) EstablishSession() error {
 		panic("missing region")
 		//		return errors.New("missing region")
 	}
+
+	VerbosePrintf("!!! ep:%s, ak/sk: %s/%s, fps: %s, r: %s", s3c.Endpoint, s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, TrueIsYes(true), s3c.Region)
 
 	awsConfig := aws.NewConfig().
 		WithEndpoint(s3c.Endpoint).
@@ -308,7 +304,10 @@ func (s3c *S3ClientSession) CreateBucket() error {
 	VerbosePrintln("CreateBucket()::::region is " + s3c.Region)
 	VerbosePrintf("bucket was %q", s3c.Bucket)
 	VerbosePrintf("creds: %q/%q", s3c.Credentials.AccessKey, s3c.Credentials.SecretKey)
+	VerbosePrintf("region: %q", s3c.Region)
 	VerbosePrintf("ep: %q", s3c.Endpoint)
+
+	VerbosePrintf("!!! ep:%s, ak/sk: %s/%s, fps: %s, r: %s", s3c.Endpoint, s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, TrueIsYes(true), s3c.Region)
 
 	if len(s3c.PolicyId) == 0 || strings.EqualFold(s3c.PolicyId, "default") {
 		VerbosePrintln("s3c.Client.CreateBucket()")
@@ -600,7 +599,7 @@ func S3HelperScript(profile string, region string, endpoint string) string {
 	var scriptLine []string
 	scriptLine = append(scriptLine, "#!/usr/bin/env bash")
 	scriptLine = append(scriptLine, "export S3_ENDPOINT="+endpoint)
-	scriptLine = append(scriptLine, "export AWS_OPTS=\" --endpoint-url="+endpoint+" --profile "+profile+" --region "+region+"\"")
+	scriptLine = append(scriptLine, "export AWS_OPTS=\" --endpoint-url=${S3_ENDPOINT} --profile "+profile+" --region "+region+" --no-verify-ssl\"")
 	scriptLine = append(scriptLine, "export S3API=0")
 	scriptLine = append(scriptLine, "if [ \"$1\" == \"s3api\" ];	then")
 	scriptLine = append(scriptLine, "\tshift")
@@ -611,6 +610,35 @@ func S3HelperScript(profile string, region string, endpoint string) string {
 	scriptLine = append(scriptLine, "else")
 	scriptLine = append(scriptLine, "\taws $AWS_OPTS s3 $@")
 	scriptLine = append(scriptLine, "fi")
+	return strings.Join(scriptLine, "\n")
+}
+
+func S3HelperScriptBuiltInCreds(region string, endpoint string, ak string, sk string) string {
+	var scriptLine []string
+	scriptLine = append(scriptLine, "#!/usr/bin/env bash")
+	scriptLine = append(scriptLine, "export AWS_ACCESS_KEY_ID="+ak)
+	scriptLine = append(scriptLine, "export AWS_SECRET_ACCESS_KEY="+sk)
+
+	scriptLine = append(scriptLine, fmt.Sprintf("export AWS_OPTS=\" --endpoint-url=%s --region %s --no-verify-ssl\"", endpoint, region))
+	scriptLine = append(scriptLine, "export S3API=0")
+	scriptLine = append(scriptLine, "if [ \"$1\" == \"s3api\" ];	then")
+	scriptLine = append(scriptLine, "\tshift")
+	scriptLine = append(scriptLine, "\texport S3API=1")
+	scriptLine = append(scriptLine, "fi")
+	scriptLine = append(scriptLine, "if [ $S3API -eq	1 ]; then")
+	scriptLine = append(scriptLine, "\taws $AWS_OPTS s3api $@")
+	scriptLine = append(scriptLine, "else")
+	scriptLine = append(scriptLine, "\taws $AWS_OPTS s3 $@")
+	scriptLine = append(scriptLine, "fi")
+	return strings.Join(scriptLine, "\n")
+}
+
+func S3HelperScriptBuiltInCredsCreateBucket(region string, endpoint string, ak string, sk string, bucket string) string {
+	var scriptLine []string
+	scriptLine = append(scriptLine, "export AWS_ACCESS_KEY_ID="+ak)
+	scriptLine = append(scriptLine, "export AWS_SECRET_ACCESS_KEY="+sk)
+	scriptLine = append(scriptLine, fmt.Sprintf("export AWS_OPTS=\" --endpoint-url=%s --region %s --no-verify-ssl\"", endpoint, region))
+	scriptLine = append(scriptLine, fmt.Sprintf("\taws $AWS_OPTS s3 mb s3://%s", bucket))
 	return strings.Join(scriptLine, "\n")
 }
 
