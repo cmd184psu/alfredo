@@ -33,10 +33,14 @@ func CSVtoArray(tagcsv string) []string {
 	return tagcsv_array
 }
 
+func Sanitized(s string) string {
+	return strings.TrimSpace(strings.ToLower(s))
+}
+
 func SliceContains(haystack []string, needle string) bool {
-	sanitized_needle := strings.TrimSpace(strings.ToLower(needle))
+	sanitized_needle := Sanitized(needle)
 	for _, h := range haystack {
-		if strings.Contains(sanitized_needle, strings.TrimSpace(strings.ToLower(h))) {
+		if strings.EqualFold(sanitized_needle, Sanitized(h)) {
 			return true
 		}
 	}
