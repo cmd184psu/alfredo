@@ -36,6 +36,7 @@ const (
 	LogoutRoute            = "/logout"
 	StaticRoute            = "/*"
 	StaticDirRoute         = "./static"
+	ExpireTime             = 120 //expire JWT token in 120 minutes
 )
 
 func ContentTypeJSON() (string, string) {
@@ -208,7 +209,7 @@ func (jhs *JwtHttpsServerStruct) StartServer() error {
 }
 
 func (jhs *JwtHttpsServerStruct) UpdateClaims(username string, w http.ResponseWriter) {
-	expirationTime := time.Now().Add(5 * time.Minute)
+	expirationTime := time.Now().Add(ExpireTime * time.Minute)
 	claims := &JwtClaims{
 		Username: username,
 		StandardClaims: jwt.StandardClaims{
@@ -233,12 +234,14 @@ func (jhs *JwtHttpsServerStruct) AuthMiddleware(next http.HandlerFunc) http.Hand
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
+			log.Println("err1")
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
 		bearerToken := strings.Split(authHeader, " ")
 		if len(bearerToken) != 2 {
+			log.Println("err2")
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -249,6 +252,7 @@ func (jhs *JwtHttpsServerStruct) AuthMiddleware(next http.HandlerFunc) http.Hand
 		})
 
 		if err != nil {
+			log.Printf("err3: %s", err.Error())
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -257,6 +261,7 @@ func (jhs *JwtHttpsServerStruct) AuthMiddleware(next http.HandlerFunc) http.Hand
 			r.Header.Set("Username", claims.Username)
 			next.ServeHTTP(w, r)
 		} else {
+			log.Println("err4")
 			w.WriteHeader(http.StatusUnauthorized)
 		}
 	}

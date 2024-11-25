@@ -1,6 +1,7 @@
 package alfredo
 
 import (
+	"os"
 	"reflect"
 	"sort"
 	"testing"
@@ -97,4 +98,94 @@ func TestBoolMapContainer_ToSlice(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTail(t *testing.T) {
+	content := `Line 1
+Line 2
+Line 3
+Line 4
+Line 5
+Line 6
+at com.example.Main.method(Main.java:42)
+Line 7
+Line 8
+at java.util.ArrayList.get(ArrayList.java:500)
+Line 9
+Line 10`
+
+	// Create a temporary file
+	tmpFile, err := os.CreateTemp("", "testfile")
+	if err != nil {
+		t.Fatalf("Failed to create temporary file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write content to the file
+	_, err = tmpFile.WriteString(content)
+	if err != nil {
+		t.Fatalf("Failed to write to temporary file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test Tail function
+	expected := []string{
+		"Line 5",
+		"Line 6",
+		"Line 7",
+		"Line 8",
+		"Line 9",
+		"Line 10",
+	}
+	result, err := Tail(tmpFile.Name(), 6)
+	if err != nil {
+		t.Fatalf("Tail failed: %v", err)
+	}
+
+	if !equalSlices(result, expected) {
+		t.Errorf("Expected %v, got %v", expected, result)
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	input := []byte("Line 1\nLine 2\nLine 3\n")
+	expected := []string{"Line 1", "Line 2", "Line 3"}
+
+	result := splitLines(input)
+	if !equalSlices(result, expected) {
+		t.Errorf("Expected %v, got %v", expected, result)
+	}
+}
+
+func TestFilterLines(t *testing.T) {
+	input := []string{
+		"Line 1",
+		"at com.example.Main.method(Main.java:42)",
+		"Line 2",
+		"at java.util.ArrayList.get(ArrayList.java:500)",
+		"Line 3",
+	}
+	expected := []string{
+		"Line 1",
+		"Line 2",
+		"Line 3",
+	}
+
+	result := filterLines(input)
+	if !equalSlices(result, expected) {
+		t.Errorf("Expected %v, got %v", expected, result)
+	}
+}
+
+// Helper function to compare slices
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

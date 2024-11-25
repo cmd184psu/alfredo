@@ -1,13 +1,17 @@
 package alfredo
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/md5"
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,7 +127,7 @@ func HumanReadableSeconds(s int64) string {
 	minutes := d / time.Minute
 	d -= minutes * time.Minute
 	seconds := d / time.Second
-	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+	return fmt.Sprintf("%02d H:%02d M:%02d S", hours, minutes, seconds)
 }
 
 func HumanReadableStorageCapacity(b int64) string {
@@ -352,6 +356,15 @@ func MD5SumString(s string) string {
 	return MD5SumBA([]byte(s))
 }
 
+func MD5SumFile(s string) (string, error) {
+	var result string
+	if err := System3toCapturedString(&result, "md5sum "+s); err != nil {
+		return "error", err
+	}
+
+	return result, nil
+}
+
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 func GenerateRandomAlphanumString(n int) string {
@@ -455,4 +468,161 @@ func PrintSortedMap[K comparable, V any](m map[K]V) {
 	for _, k := range keys {
 		fmt.Printf("%v: %v\n", k, m[k])
 	}
+}
+
+func MapToTableSlice(data map[string]string) []string {
+	var content []string
+
+	// Find the maximum length of keys and values
+	maxKeyLen, maxValueLen := 0, 0
+	for k, v := range data {
+		if len(k) > maxKeyLen {
+			maxKeyLen = len(k)
+		}
+		if len(v) > maxValueLen {
+			maxValueLen = len(v)
+		}
+	}
+
+	// Calculate total width of the table
+	totalWidth := maxKeyLen + maxValueLen + 7 // 7 accounts for borders and spaces
+
+	// Append top border
+	content = append(content, "+"+strings.Repeat("-", totalWidth-2)+"+")
+
+	// Append header
+	content = append(content, fmt.Sprintf("| %-*s | %-*s |", maxKeyLen, "Field", maxValueLen, "Value"))
+
+	// Append separator
+	content = append(content, "+"+strings.Repeat("-", maxKeyLen+2)+"+"+strings.Repeat("-", maxValueLen+2)+"+")
+
+	// Append data rows
+	for k, v := range data {
+		content = append(content, fmt.Sprintf("| %-*s | %-*s |", maxKeyLen, k, maxValueLen, v))
+	}
+
+	// Append bottom border
+	content = append(content, "+"+strings.Repeat("-", totalWidth-2)+"+")
+
+	return content
+}
+
+func MapToTableSliceOrdered(data map[string]string, order []string) []string {
+	var content []string
+
+	// Find the maximum length of keys and values
+	maxKeyLen, maxValueLen := 0, 0
+	for _, k := range order {
+		v := data[k]
+		if len(k) > maxKeyLen {
+			maxKeyLen = len(k)
+		}
+		if len(v) > maxValueLen {
+			maxValueLen = len(v)
+		}
+	}
+
+	// Calculate total width of the table
+	totalWidth := maxKeyLen + maxValueLen + 7 // 7 accounts for borders and spaces
+
+	// Append top border
+	content = append(content, "+"+strings.Repeat("-", totalWidth-2)+"+")
+
+	// Append header
+	//content = append(content, fmt.Sprintf("| %-*s | %-*s |", maxKeyLen, "Field", maxValueLen, "Value"))
+
+	// Append separator
+	//content = append(content, "+"+strings.Repeat("-", maxKeyLen+2)+"+"+strings.Repeat("-", maxValueLen+2)+"+")
+
+	// Append data rows in specified order
+	for _, k := range order {
+		v := data[k]
+		content = append(content, fmt.Sprintf("| %-*s | %-*s |", maxKeyLen, k, maxValueLen, v))
+	}
+
+	// Append bottom border
+	content = append(content, "+"+strings.Repeat("-", totalWidth-2)+"+")
+
+	return content
+}
+
+// Tail reads the last numLines from the file, ignoring Java stack trace lines.
+func Tail(filePath string, numLines int) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	const chunkSize = 1024 // Read in chunks of 1KB
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	fileSize := stat.Size()
+	var lines []string
+	var buffer []byte
+
+	// Start reading from the end
+	offset := fileSize
+	for offset > 0 && len(lines) <= numLines {
+		readSize := chunkSize
+		if offset < int64(chunkSize) {
+			readSize = int(offset)
+		}
+		offset -= int64(readSize)
+
+		// Seek and read the chunk
+		_, err := file.Seek(offset, io.SeekStart) // Updated to io.SeekStart
+		if err != nil {
+			return nil, err
+		}
+
+		chunk := make([]byte, readSize)
+		_, err = file.Read(chunk)
+		if err != nil {
+			return nil, err
+		}
+
+		// Prepend the new chunk to buffer
+		buffer = append(chunk, buffer...)
+		lines = filterLines(splitLines(buffer))
+
+		// Keep only the last `numLines` lines
+		if len(lines) > numLines {
+			lines = lines[len(lines)-numLines:]
+		}
+	}
+
+	return lines, nil
+}
+
+// splitLines splits the input byte slice into lines.
+func splitLines(data []byte) []string {
+	scanner := bufio.NewScanner(bufio.NewReader(bytes.NewReader(data)))
+	var result []string
+	for scanner.Scan() {
+		result = append(result, scanner.Text())
+	}
+	return result
+}
+
+// filterLines removes lines that look like part of a Java stack trace.
+func filterLines(lines []string) []string {
+	stackTracePattern := regexp.MustCompile(`^\s*at\s+.*\((.*\.java:\d+|Native Method)\)`)
+	filtered := []string{}
+	for _, line := range lines {
+		if !stackTracePattern.MatchString(line) {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered
+}
+
+func EatErrorReturnString(s string, e error) string {
+	if e == nil {
+		return s
+	}
+	panic(e)
 }

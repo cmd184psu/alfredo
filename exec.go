@@ -139,6 +139,7 @@ func (ex *ExecStruct) Execute() error {
 			e = ex.ssh.SecureRemoteExecution(ex.mainCli)
 			ex.body = ex.ssh.stdout
 		} else {
+			ex.WithDirectory(ex.dir)
 			e = ex.mainExecFunc(&ex.body, ex.mainCli)
 			VerbosePrintln("mainExecFunc completed")
 			time.Sleep(5 * time.Second)

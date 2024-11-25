@@ -962,3 +962,10 @@ func (s SSHStruct) HammerTest() error {
 	fmt.Printf("Successes: %d, Failures: %d\n", successes, failures)
 	return nil
 }
+
+func (s SSHStruct) GetRemoteFileHash(path string) (string, error) {
+	if err := s.SecureRemoteExecution(fmt.Sprintf("md5sum %q", path)); err != nil {
+		return "error", err
+	}
+	return strings.Trim(s.stdout, "\n"), nil
+}

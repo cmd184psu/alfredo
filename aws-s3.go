@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"gopkg.in/ini.v1"
 )
@@ -43,14 +46,17 @@ type S3ClientSession struct {
 	Endpoint    string       `json:"endpoint"`
 	Region      string       `json:"region"`
 	ObjectKey   string       `json:"key"`
-	Client      *s3.S3
-	Versioning  bool `json:"versioning"`
-	established bool
-	keepBucket  bool
-	PolicyId    string `json:"policyid"`
-	session     *session.Session
-	ctx         context.Context
-	forceSSL    bool
+	//	Client      *s3.S3
+	Client         s3iface.S3API
+	Versioning     bool `json:"versioning"`
+	established    bool
+	keepBucket     bool
+	PolicyId       string `json:"policyid"`
+	session        *session.Session
+	ctx            context.Context
+	forceSSL       bool
+	logging        bool
+	maxConcurrency int
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
@@ -58,6 +64,17 @@ const S3_default_credentials_file = "~/.aws/credentials"
 func (s3c *S3ClientSession) SetSession(s *session.Session) {
 	s3c.session = s
 }
+
+func (s3c *S3ClientSession) SetConcurrency(c int) {
+	s3c.maxConcurrency = c
+}
+func (s3c *S3ClientSession) GetConcurrency() int {
+	if s3c.maxConcurrency == 0 {
+		s3c.maxConcurrency = defaultMaxConcurrency
+	}
+	return s3c.maxConcurrency
+}
+
 func (s3c *S3ClientSession) GetSession() *session.Session {
 	return s3c.session
 }
@@ -784,7 +801,7 @@ func (s3c *S3ClientSession) HeadObject() (bool, error) {
 	return true, nil
 }
 
-func (s3c *S3ClientSession) GetS3Ptr() *s3.S3 {
+func (s3c *S3ClientSession) GetS3Ptr() s3iface.S3API {
 	return s3c.Client
 }
 
@@ -851,11 +868,17 @@ func (r *ProgressReader) Read(p []byte) (int, error) {
 	fmt.Printf("\rUploading %s: %.2f%%", r.Key, progress)
 	return n, err
 }
-
-func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string) error {
+func (s3c *S3ClientSession) EnableLogging(l bool) {
+	s3c.logging = l
+	if s3c.logging {
+		log.Println("Logging is now enabled (S3ClientSession)")
+	}
+}
+func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string, progress *ProgressTracker) error {
 	uploader := s3manager.NewUploader(s3c.GetSession())
-
+	skip := false
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		skip = false
 		if err != nil {
 			return err
 		}
@@ -881,41 +904,79 @@ func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string) error {
 			Total:  info.Size(),
 			Key:    key,
 		}
-
-		_, err = uploader.Upload(&s3manager.UploadInput{
+		s3c.ctx = context.Background()
+		headOutput, herr := s3c.Client.HeadObjectWithContext(s3c.ctx, &s3.HeadObjectInput{
 			Bucket: aws.String(s3c.Bucket),
 			Key:    aws.String(key),
-			Body:   progressReader,
 		})
-		if err != nil {
-			return fmt.Errorf("failed to upload file %s: %v", path, err)
+		if herr == nil {
+			VerbosePrintf("headOutput: Etag: %s", *headOutput.ETag)
+			if !GetForce() {
+				log.Printf("Skipping object s3://%s/%s, already exists on target", s3c.Bucket, key)
+				skip = true
+
+			}
 		}
 
-		fmt.Printf("\nUploaded %s to s3://%s/%s\n", path, s3c.Bucket, key)
+		if skip && !GetForce() {
+			if s3c.logging {
+				log.Printf("\nSkipped upload for file %s to s3://%s/%s, object already exists\n", path, s3c.Bucket, key)
+			}
+			fmt.Printf("\nSkipped upload for file %s to s3://%s/%s, object already exists\n", path, s3c.Bucket, key)
+			VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, key)
+			atomic.AddInt64(&progress.SkippedObjects, 1)
+			VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, key)
+
+		} else {
+			_, err = uploader.Upload(&s3manager.UploadInput{
+				Bucket: aws.String(s3c.Bucket),
+				Key:    aws.String(key),
+				Body:   progressReader,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to upload file %s: %v", path, err)
+			}
+			if s3c.logging {
+				log.Printf("\nUploaded %s to s3://%s/%s\n", path, s3c.Bucket, key)
+			}
+			fmt.Printf("\nUploaded %s to s3://%s/%s\n", path, s3c.Bucket, key)
+			VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, key)
+			atomic.AddInt64(&progress.MigratedObjects, 1)
+			VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, key)
+		}
 		return nil
 	})
 
 	if err != nil {
 		return fmt.Errorf("error walking the directory: %v", err)
 	}
+	if s3c.logging {
+		log.Printf("\nSync has concluded for bucket %s\n", s3c.Bucket)
+	}
 
 	return nil
 }
 
 const (
-	partSize       int64 = 5 * 1024 * 1024 // 5MB per part
-	maxConcurrency       = 10              // Maximum number of concurrent part uploads
-	maxRetries           = 3               // Maximum number of retries for failed operations
-	retryDelay           = 1 * time.Second // Delay between retries
+	defaultPartSizeMin int64 = 5 * 1024 * 1024           // 5MB per part
+	defaultPartSizeMax int64 = defaultPartSizeMin * 1024 // 5GB per part
+	//defaultPartSizeMax int64 = defaultPartSizeMin + 1024*1024 // 5KB+10 bytes? per part
+	//maxConcurrency           = 10                      // Maximum number of concurrent part uploads
+	maxRetries = 3               // Maximum number of retries for failed operations
+	retryDelay = 1 * time.Second // Delay between retries
+	maxParts   = 10000           // per AMZ specification
+	//maxParts              = 10 // per AMZ specification
+	defaultMaxConcurrency = 10
 )
 
 type ProgressTracker struct {
-	TotalObjects     int64
-	CompletedObjects int64
-	TotalBytes       int64
-	CompletedBytes   int64
-	FailedObjects    map[string]error
-	mu               sync.Mutex
+	TotalObjects    int64
+	MigratedObjects int64
+	SkippedObjects  int64
+	TotalBytes      int64
+	CompletedBytes  int64
+	FailedObjects   map[string]error
+	mu              sync.Mutex
 }
 
 type CopyResult struct {
@@ -962,9 +1023,9 @@ func (sourceS3 S3ClientSession) CopyAllObjects(
 	progress.FailedObjects = make(map[string]error)
 
 	// Create worker pool for concurrent object copying
-	workerPool := make(chan struct{}, maxConcurrency)
+	workerPool := make(chan struct{}, sourceS3.GetConcurrency())
 	var wg sync.WaitGroup
-	resultsChan := make(chan CopyResult, maxConcurrency)
+	resultsChan := make(chan CopyResult, sourceS3.GetConcurrency())
 
 	// Start result collector
 	go func() {
@@ -974,7 +1035,6 @@ func (sourceS3 S3ClientSession) CopyAllObjects(
 				progress.FailedObjects[result.SourceKey] = result.Error
 				progress.mu.Unlock()
 			}
-			atomic.AddInt64(&progress.CompletedObjects, 1)
 		}
 	}()
 
@@ -1010,7 +1070,9 @@ func (sourceS3 S3ClientSession) CopyAllObjects(
 						Duration:    time.Since(startTime),
 						BytesCopied: *obj.Size,
 					}
-
+					if result.Success {
+						log.Printf("Uploaded object to s3://%s/%s", targetS3.Bucket, result.SourceKey)
+					}
 					resultsChan <- result
 				}(key)
 			}
@@ -1025,11 +1087,62 @@ func (sourceS3 S3ClientSession) CopyAllObjects(
 	close(resultsChan)
 
 	if len(progress.FailedObjects) > 0 {
+		log.Printf("%s\n", PrettyPrint(progress.FailedObjects))
+
 		return fmt.Errorf("some objects failed to copy. Check FailedObjects map for details")
 	}
 
 	return nil
 }
+
+func CalculatePartSize(objectSize int64) int64 {
+	if objectSize <= defaultPartSizeMin {
+		return 0
+	}
+	if objectSize > 10000*defaultPartSizeMax {
+		return 0
+	}
+	partSize := defaultPartSizeMin
+
+	// for float64(objectSize)/float64(partSize) > float64(maxParts) {
+	// 	partSize *= 2
+	// }
+	for objectSize/partSize > maxParts {
+		partSize *= 2
+	}
+
+	if partSize > defaultPartSizeMax {
+		partSize = defaultPartSizeMax
+	}
+	// fmt.Printf("object size of %d (%s) nets you %d (%s)\n",
+	// 	objectSize,
+	// 	alfredo.HumanReadableStorageCapacity(objectSize),
+	// 	partSize,
+	// 	alfredo.HumanReadableStorageCapacity(partSize))
+
+	return partSize
+}
+
+// func CalculatePartSize(l int64) int64 {
+// 	if l < defaultPartSizeMax {
+// 		return defaultPartSizeMin
+// 	}
+// 	return l / int64(maxParts)
+// }
+
+// func CalculateTotalParts(objSize int64, partSize int64) int {
+// 	//return int((objSize + partSize - 1) / partSize)
+// 	return int((objSize-1)/partSize + 1)
+// }
+
+func CalculateTotalParts(objectSize, partSize int64) int {
+	if objectSize < 5*1024*1024 {
+		return 0
+	}
+	return int(math.Ceil(float64(objectSize) / float64(partSize)))
+}
+
+//*headOutput.ContentLength + partSize - 1) / partSize
 
 // CopyObjectBetweenBuckets copies a single object between S3-compatible systems
 func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
@@ -1039,10 +1152,12 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	progress *ProgressTracker,
 ) error {
 	// Get source object details
-	var headOutput *s3.HeadObjectOutput
+
+	var headOutputSrc *s3.HeadObjectOutput
+	var headOutputTgt *s3.HeadObjectOutput
 	err := withRetry(func() error {
 		var err error
-		headOutput, err = sourceS3.Client.HeadObjectWithContext(sourceS3.ctx, &s3.HeadObjectInput{
+		headOutputSrc, err = sourceS3.Client.HeadObjectWithContext(sourceS3.ctx, &s3.HeadObjectInput{
 			Bucket: aws.String(sourceS3.Bucket),
 			Key:    aws.String(sourceKey),
 		})
@@ -1052,8 +1167,29 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 		return fmt.Errorf("failed to get source object details: %v", err)
 	}
 
+	if *headOutputSrc.ContentLength > defaultPartSizeMax*10000 {
+		return fmt.Errorf("content length of %d is too large to process", *headOutputSrc.ContentLength)
+	}
+
+	headOutputTgt, err = targetS3.Client.HeadObjectWithContext(targetS3.ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(targetS3.Bucket),
+		Key:    aws.String(targetKey),
+	})
+	VerbosePrintf("headOutputSrc: Etag: %s", *headOutputSrc.ETag)
+	if err == nil {
+		VerbosePrintf("headOutputTgt: Etag: %s", *headOutputTgt.ETag)
+		if !GetForce() {
+			log.Printf("Skipping object s3://%s/%s, already exists on target", targetS3.Bucket, targetKey)
+			VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
+			atomic.AddInt64(&progress.SkippedObjects, 1)
+			VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
+			atomic.AddInt64(&progress.CompletedBytes, *headOutputSrc.ContentLength)
+			return nil
+		}
+	}
+
 	// For small files, use GET and PUT instead of COPY
-	if *headOutput.ContentLength < partSize {
+	if *headOutputSrc.ContentLength < defaultPartSizeMin {
 		// Get the object
 		getOutput, err := sourceS3.Client.GetObjectWithContext(sourceS3.ctx, &s3.GetObjectInput{
 			Bucket: aws.String(sourceS3.Bucket),
@@ -1084,12 +1220,15 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 		if err != nil {
 			return fmt.Errorf("failed to put object: %v", err)
 		}
-
-		atomic.AddInt64(&progress.CompletedBytes, *headOutput.ContentLength)
+		VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
+		atomic.AddInt64(&progress.MigratedObjects, 1)
+		VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
+		atomic.AddInt64(&progress.CompletedBytes, *headOutputSrc.ContentLength)
 		return nil
 	}
 
 	// For large files, use multipart upload with streaming
+	log.Printf("Creating MPU for s3://%s/%s", targetS3.Bucket, targetKey)
 	createOutput, err := targetS3.Client.CreateMultipartUploadWithContext(targetS3.ctx, &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(targetS3.Bucket),
 		Key:    aws.String(targetKey),
@@ -1098,20 +1237,29 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 		return fmt.Errorf("failed to create multipart upload: %v", err)
 	}
 
-	totalParts := (*headOutput.ContentLength + partSize - 1) / partSize
+	partSize := CalculatePartSize(*headOutputSrc.ContentLength)
+	log.Printf("Using partsize: %s", HumanReadableStorageCapacity(partSize))
+	totalParts := CalculateTotalParts(*headOutputSrc.ContentLength, partSize)
+	//*headOutput.ContentLength + partSize - 1) / partSize
+	log.Printf("Using total parts: %d", totalParts)
+	log.Printf("Maximum parts: %d", maxParts)
+	if totalParts > maxParts {
+		panic("requested too many parts for this object")
+	}
+	log.Printf("Part size range: %s-%s", HumanReadableStorageCapacity(defaultPartSizeMin), HumanReadableStorageCapacity(defaultPartSizeMax))
 	parts := make([]*s3.CompletedPart, totalParts)
 	partsChan := make(chan int64, totalParts)
 	errorsChan := make(chan error, totalParts)
 	var uploadWg sync.WaitGroup
 
 	// Fill parts channel
-	for i := int64(1); i <= totalParts; i++ {
+	for i := int64(1); i <= int64(totalParts); i++ {
 		partsChan <- i
 	}
 	close(partsChan)
 
 	// Process parts concurrently
-	for i := 0; i < maxConcurrency; i++ {
+	for i := 0; i < sourceS3.GetConcurrency(); i++ {
 		uploadWg.Add(1)
 		go func() {
 			defer uploadWg.Done()
@@ -1119,8 +1267,8 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 			for partNumber := range partsChan {
 				startByte := (partNumber - 1) * partSize
 				endByte := startByte + partSize - 1
-				if endByte >= *headOutput.ContentLength {
-					endByte = *headOutput.ContentLength - 1
+				if endByte >= *headOutputSrc.ContentLength {
+					endByte = *headOutputSrc.ContentLength - 1
 				}
 
 				// Get the part from source
@@ -1143,6 +1291,8 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 				readSeeker := bytes.NewReader(body)
 
 				// Upload the part
+				log.Printf("Uploading part of MPU for s3://%s/%s part #: %d of %d", targetS3.Bucket, targetKey, partNumber, totalParts)
+
 				uploadOutput, err := targetS3.Client.UploadPartWithContext(targetS3.ctx, &s3.UploadPartInput{
 					Bucket:     aws.String(targetS3.Bucket),
 					Key:        aws.String(targetKey),
@@ -1170,9 +1320,13 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	uploadWg.Wait()
 	close(errorsChan)
 
+	hasErrors := false
+
 	// Check for errors
 	for err := range errorsChan {
 		// Abort multipart upload
+		log.Printf("Aborting MPU for s3://%s/%s due to error: %s", targetS3.Bucket, targetKey, err.Error())
+
 		_, abortErr := targetS3.Client.AbortMultipartUploadWithContext(targetS3.ctx, &s3.AbortMultipartUploadInput{
 			Bucket:   aws.String(targetS3.Bucket),
 			Key:      aws.String(targetKey),
@@ -1181,8 +1335,14 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 		if abortErr != nil {
 			return fmt.Errorf("failed to abort multipart upload: %v (original error: %v)", abortErr, err)
 		}
-		return err
+		hasErrors = true
+
 	}
+
+	if hasErrors {
+		return fmt.Errorf("errors occurred; some objects MPU were aborted as a result")
+	}
+	log.Printf("Completing MPU for s3://%s/%s", targetS3.Bucket, targetKey)
 
 	// Complete multipart upload
 	_, err = targetS3.Client.CompleteMultipartUploadWithContext(targetS3.ctx, &s3.CompleteMultipartUploadInput{
@@ -1194,8 +1354,13 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 		},
 	})
 	if err != nil {
+		log.Printf("MPU for s3://%s/%s failed to complete", targetS3.Bucket, targetKey)
 		return fmt.Errorf("failed to complete multipart upload: %v", err)
 	}
+	log.Printf("MPU for s3://%s/%s successfully completed", targetS3.Bucket, targetKey)
+	VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
+	atomic.AddInt64(&progress.MigratedObjects, 1)
+	VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
 
 	return nil
 }

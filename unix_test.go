@@ -3,6 +3,7 @@ package alfredo
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -65,4 +66,62 @@ func TestGenerateMoveCLI(t *testing.T) {
 		}()
 		GenerateMoveCLI("non_existent_file.txt", "_suffix")
 	})
+}
+
+func TestSystem3toCapturedString(t *testing.T) {
+	// Helper function to run the test
+	runTest := func(cmd string, expectedOutput string, expectedError bool) {
+		var output string
+		err := System3toCapturedString(&output, cmd)
+
+		if expectedError && err == nil {
+			t.Errorf("Expected an error for command: %s, but got none", cmd)
+		}
+		if !expectedError && err != nil {
+			t.Errorf("Unexpected error for command: %s. Error: %v", cmd, err)
+		}
+		if strings.EqualFold(expectedOutput, "content") {
+			if len(output) == 0 {
+				t.Errorf("For command: %s\nExpected output len: >0\nGot: 0", cmd)
+			}
+		} else {
+			if output != expectedOutput {
+				t.Errorf("For command: %s\nExpected output: %s\nGot: %s", cmd, expectedOutput, output)
+			}
+		}
+	}
+
+	// Test cases
+	testCases := []struct {
+		cmd            string
+		expectedOutput string
+		expectedError  bool
+	}{
+		// Test basic command
+		{"echo Hello", "Hello\n", false},
+
+		// Test command with quotes
+		{"echo \"Hello World\"", "Hello World\n", false},
+
+		// Test cd command
+		{"cd /usr && pwd", "/usr\n", false},
+
+		// Test command with multiple spaces
+		{"echo  Hello    World", "Hello World\n", false},
+
+		// Test non-existent command
+		{"nonexistentcommand", "", true},
+
+		// Test command with arguments
+		{"ls -l /usr", "content", false}, // Output will vary, so we don't check it
+
+		// Test command with environment variables
+
+		//environment isn't carrying over for whatever reason, skip for now
+		//{"echo $HOME", os.Getenv("HOME"), false}, // Output will vary, so we don't check it
+	}
+
+	for _, tc := range testCases {
+		runTest(tc.cmd, tc.expectedOutput, tc.expectedError)
+	}
 }

@@ -50,12 +50,21 @@ func Touch(fileName string) error {
 
 func System3toCapturedString(s *string, cmd string) error {
 	VerbosePrintln(cmd)
-
-	cmd = strings.ReplaceAll(strings.TrimSpace(cmd), "  ", " ")
+	for strings.Contains(cmd, "  ") {
+		cmd = strings.ReplaceAll(strings.TrimSpace(cmd), "  ", " ")
+	}
 	arglist := strings.Split(cmd, " ")
 	arglist2 := make([]string, 0)
 
-	for i := 0; i < len(arglist); i++ {
+	st := 0
+	dir := ""
+	if len(arglist) > 3 && strings.EqualFold(arglist[0], "cd") && strings.EqualFold(arglist[2], "&&") {
+		dir = arglist[1]
+		st = 3
+	}
+
+	for i := st; i < len(arglist); i++ {
+		//		VerbosePrintf("arglist[%d]=%s", i, arglist[i]])
 		if strings.HasPrefix(arglist[i], "\"") {
 			for j := i; j < len(arglist); j++ {
 				arglist2 = append(arglist2, arglist[j])
@@ -73,9 +82,22 @@ func System3toCapturedString(s *string, cmd string) error {
 	}
 
 	var b bytes.Buffer
-	err := Popen3(&b,
-		exec.Command(arglist[0], arglist[1:]...),
-	)
+	VerbosePrintf("cmd=%s", arglist[st])
+	var runme *exec.Cmd
+	if st+1 >= len(arglist) {
+		runme = exec.Command(arglist[st])
+
+	} else {
+		runme = exec.Command(arglist[st], arglist[st+1:]...)
+	}
+	if len(dir) > 0 {
+		VerbosePrintf("dir=%s", dir)
+		runme.Dir = dir
+	}
+	// runme.Env = os.Environ()
+	// VerbosePrintln(strings.Join(runme.Env, "\n"))
+	err := Popen3(&b, runme)
+
 	*s = b.String()
 	return err
 }
