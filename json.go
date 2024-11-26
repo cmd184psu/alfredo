@@ -129,3 +129,19 @@ func PrettyPrintJSONFile(filePath string) {
 	// Display the pretty-printed JSON on stdout
 	fmt.Println(string(prettyJSON))
 }
+
+func TranslateSimilarStructure(input interface{}, output interface{}) error {
+	// Marshal the input structure into a []byte
+	data, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("error marshaling: %v", err)
+	}
+
+	// Unmarshal the []byte into the output structure
+	err = json.Unmarshal(data, output)
+	if err != nil {
+		return fmt.Errorf("error unmarshaling: %v", err)
+	}
+
+	return nil
+}

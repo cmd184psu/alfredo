@@ -1104,9 +1104,6 @@ func CalculatePartSize(objectSize int64) int64 {
 	}
 	partSize := defaultPartSizeMin
 
-	// for float64(objectSize)/float64(partSize) > float64(maxParts) {
-	// 	partSize *= 2
-	// }
 	for objectSize/partSize > maxParts {
 		partSize *= 2
 	}
@@ -1114,26 +1111,8 @@ func CalculatePartSize(objectSize int64) int64 {
 	if partSize > defaultPartSizeMax {
 		partSize = defaultPartSizeMax
 	}
-	// fmt.Printf("object size of %d (%s) nets you %d (%s)\n",
-	// 	objectSize,
-	// 	alfredo.HumanReadableStorageCapacity(objectSize),
-	// 	partSize,
-	// 	alfredo.HumanReadableStorageCapacity(partSize))
-
 	return partSize
 }
-
-// func CalculatePartSize(l int64) int64 {
-// 	if l < defaultPartSizeMax {
-// 		return defaultPartSizeMin
-// 	}
-// 	return l / int64(maxParts)
-// }
-
-// func CalculateTotalParts(objSize int64, partSize int64) int {
-// 	//return int((objSize + partSize - 1) / partSize)
-// 	return int((objSize-1)/partSize + 1)
-// }
 
 func CalculateTotalParts(objectSize, partSize int64) int {
 	if objectSize < 5*1024*1024 {
@@ -1141,8 +1120,6 @@ func CalculateTotalParts(objectSize, partSize int64) int {
 	}
 	return int(math.Ceil(float64(objectSize) / float64(partSize)))
 }
-
-//*headOutput.ContentLength + partSize - 1) / partSize
 
 // CopyObjectBetweenBuckets copies a single object between S3-compatible systems
 func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
@@ -1361,6 +1338,85 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
 	atomic.AddInt64(&progress.MigratedObjects, 1)
 	VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
+	return nil
+}
 
+type ownerBucketACLStruct struct {
+	BucketOwnerID string `json:"ID"`
+}
+type granteeBucketACLStruct struct {
+	GranteeUserID   string `json:"ID"`
+	GranteeUserType string `json:"Type"`
+}
+type grantBucketACLStruct struct {
+	Grantee    granteeBucketACLStruct `json:"Grantee"`
+	Permission string                 `json:"Permission"`
+}
+
+type BucketACLStruct struct {
+	Owner  ownerBucketACLStruct   `json:"Owner"`
+	Grants []grantBucketACLStruct `json:"Grants"`
+}
+
+func CreateGrant(id string, perm string) grantBucketACLStruct {
+	var g grantBucketACLStruct
+	g.Grantee.GranteeUserID = id
+	g.Permission = perm
+	g.Grantee.GranteeUserType = "CanonicalUser"
+	return g
+}
+func GenerateROBucketPolicy(existingAcl BucketACLStruct) BucketACLStruct {
+	var newAcl BucketACLStruct
+	newAcl.Owner.BucketOwnerID = existingAcl.Owner.BucketOwnerID
+
+	newAcl.Grants = append(newAcl.Grants, CreateGrant(newAcl.Owner.BucketOwnerID, "READ"))
+	newAcl.Grants = append(newAcl.Grants, CreateGrant(newAcl.Owner.BucketOwnerID, "WRITE_ACP"))
+	newAcl.Grants = append(newAcl.Grants, CreateGrant(newAcl.Owner.BucketOwnerID, "READ_ACP"))
+	return newAcl
+}
+
+func (sourceS3 S3ClientSession) GetBucketACL() (string, error) {
+	VerbosePrintln("BEGIN: GetBucketACL(...)")
+	if !sourceS3.established {
+		return "", fmt.Errorf("S3 session was not established")
+	}
+
+	acl, err := sourceS3.Client.GetBucketAcl(&s3.GetBucketAclInput{
+		Bucket: aws.String(sourceS3.Bucket),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	VerbosePrintln("END: GetBucketACL(...)")
+	return PrettyPrint(acl), nil
+}
+
+func (sourceS3 S3ClientSession) SetBucketACL(aclJson string) error {
+	VerbosePrintln("BEGIN: SetBucketACL()")
+	if !sourceS3.established {
+		return fmt.Errorf("S3 session was not established")
+	}
+
+	// Unmarshal the JSON string into an AccessControlPolicy struct
+	var aclPolicy s3.AccessControlPolicy
+	err := json.Unmarshal([]byte(aclJson), &aclPolicy)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal ACL JSON: %v", err)
+	}
+
+	// Create the PutBucketAclInput
+	aclInput := &s3.PutBucketAclInput{
+		Bucket:              aws.String(sourceS3.Bucket),
+		AccessControlPolicy: &aclPolicy,
+	}
+
+	// Set the bucket ACL
+	_, err = sourceS3.Client.PutBucketAcl(aclInput)
+	if err != nil {
+		return fmt.Errorf("failed to set bucket ACL: %v", err)
+	}
+
+	fmt.Printf("Successfully set ACL for bucket %s\n", sourceS3.Bucket)
 	return nil
 }

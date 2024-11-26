@@ -626,3 +626,10 @@ func EatErrorReturnString(s string, e error) string {
 	}
 	panic(e)
 }
+
+func DeepCopyStringToPointer(s string) *string {
+	// Create a new string with the same value
+	newString := s
+	// Return the address of the new string
+	return &newString
+}
