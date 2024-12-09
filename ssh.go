@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cmd184psu/fs-tools/fstools-gomod"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -332,7 +331,7 @@ func (this SSHStruct) SecureUploadAndSpin(localFilePath string, remoteFilePath s
 		sigChan <- true
 		errorChan <- e
 	}()
-	go fstools.Spinny(sigChan)
+	go Spinny(sigChan)
 	//errorRec = <-errorChan
 	err = <-errorChan
 	wg.Wait()

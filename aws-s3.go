@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1280,6 +1283,7 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 				getPartOutput.Body.Close()
 
 				if err != nil {
+					log.Printf("Failed to upload part %d: %v", partNumber, err)
 					errorsChan <- fmt.Errorf("failed to upload part %d: %v", partNumber, err)
 					return
 				}
@@ -1419,4 +1423,45 @@ func (sourceS3 S3ClientSession) SetBucketACL(aclJson string) error {
 
 	fmt.Printf("Successfully set ACL for bucket %s\n", sourceS3.Bucket)
 	return nil
+}
+
+// fmt.Printf("MD5 hash of the byte range %d-%d: %s\n", R, R+chunk-1, hashString)
+// return nil
+
+func (s3c *S3ClientSession) GetHashOfObjectRange(chunk int64) (string, error) {
+	headObjectOutput, err := s3c.Client.HeadObject(&s3.HeadObjectInput{
+		Bucket: &s3c.Bucket,
+		Key:    &s3c.ObjectKey,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	size := *headObjectOutput.ContentLength
+	// rand.Seed(time.Now().UnixNano())
+	var rando int64
+	for {
+		rando = rand.Int63n(size)
+		if rando+chunk < size {
+			break
+		}
+	}
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", rando, rando+chunk-1)
+	getObjectOutput, err := s3c.Client.GetObject(&s3.GetObjectInput{
+		Bucket: &s3c.Bucket,
+		Key:    &s3c.ObjectKey,
+		Range:  &rangeHeader,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer getObjectOutput.Body.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, getObjectOutput.Body); err != nil {
+		return "", err
+	}
+	hashInBytes := hash.Sum(nil)[:16]
+	hashString := hex.EncodeToString(hashInBytes)
+	return hashString, nil
 }

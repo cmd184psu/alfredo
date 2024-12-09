@@ -326,6 +326,57 @@ func Popen3GrepFast(cmd string, musthave string, mustnothave string) ([]string, 
 	return slice[:len(slice)-1], nil
 }
 
+func Popen3Grep2(cmd string, musthave string, mustnothave string) ([]string, error) {
+	var b bytes.Buffer
+	arglist := strings.Split(cmd, " ")
+
+	var slice []string
+	var greplist []string
+	if len(musthave) != 0 {
+		greplist = strings.Split(musthave, "&")
+	}
+	var antigreplist []string
+	if len(mustnothave) != 0 {
+		antigreplist = strings.Split(mustnothave, "&")
+		for i := range antigreplist {
+			antigreplist[i] = "-v " + antigreplist[i]
+		}
+	}
+
+	var err error
+	if err = Popen3(&b, exec.Command(arglist[0], arglist[1:]...)); err != nil {
+		return slice, err
+	}
+
+	var bstring = b.String()
+	if len(strings.TrimSpace(bstring)) != 0 {
+		slice = strings.Split(b.String(), "\n")
+	}
+
+	newslice := make([]string, 0)
+	for i := 0; i < len(slice); i++ {
+		if len(strings.TrimSpace(slice[i])) != 0 {
+			include := true
+			for _, must := range greplist {
+				if !strings.Contains(slice[i], must) {
+					include = false
+					break
+				}
+			}
+			for _, mustnot := range antigreplist {
+				if strings.Contains(slice[i], mustnot) {
+					include = false
+					break
+				}
+			}
+			if include {
+				newslice = append(newslice, slice[i])
+			}
+		}
+	}
+
+	return newslice, nil
+}
 func Popen3Grep(cmd string, musthave string, mustnothave string) ([]string, error) {
 	var b bytes.Buffer
 	arglist := strings.Split(cmd, " ")
@@ -830,7 +881,7 @@ func GetThreadCount(pid int) (int, error) {
 
 const no_processes_found = "no processes found"
 
-func CapturePid(jvm string, hint string) (int, error) {
+func CaptureJavaPid(jvm string, hint string) (int, error) {
 	VerbosePrintln("BEGIN CapturePid(" + jvm + ")")
 	lines, err := JPS()
 	if err != nil {
@@ -846,6 +897,48 @@ func CapturePid(jvm string, hint string) (int, error) {
 	}
 	VerbosePrintln("END CapturePid(" + jvm + ")")
 	return jlist[0], nil
+}
+
+func GetProcessList(mainHint string) ([]string, error) {
+	var capture string
+	err := System3toCapturedString(&capture, "ps aux")
+
+	if err != nil {
+		return []string{}, err
+	}
+
+	lines := strings.Split(capture, "\n")
+	var result []string
+	for _, line := range lines {
+		if strings.Contains(line, mainHint) {
+			result = append(result, line)
+		}
+	}
+	return result, nil
+}
+
+func CapturePids(main string, hint string) ([]int, error) {
+	VerbosePrintf("BEGIN CapturePids(%s,%s)", main, hint)
+	lines, err := GetProcessList(main)
+	if err != nil {
+		VerbosePrintf("\treturning with err: %s", err.Error())
+		return []int{}, err
+	}
+	var pidList []int
+	for _, line := range lines {
+		VerbosePrintf("line=%s", line)
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			pid, err := strconv.Atoi(fields[1])
+			if err != nil {
+				panic(err.Error())
+			}
+			pidList = append(pidList, pid)
+		}
+	}
+
+	VerbosePrintf("END CapturePids(%s,%s)", main, hint)
+	return pidList, nil
 }
 
 func GetArgsFromPid(pid int) ([]string, error) {

@@ -3,6 +3,7 @@ package alfredo
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -125,3 +126,190 @@ func TestSystem3toCapturedString(t *testing.T) {
 		runTest(tc.cmd, tc.expectedOutput, tc.expectedError)
 	}
 }
+func TestCapturePids(t *testing.T) {
+	type args struct {
+		main string
+		hint string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []int
+		wantErr bool
+	}{
+		{
+			name: "Single process",
+			args: args{
+				main: "bash",
+				hint: "",
+			},
+			want:    []int{os.Getpid()},
+			wantErr: false,
+		},
+		{
+			name: "Multiple processes",
+			args: args{
+				main: "go",
+				hint: "",
+			},
+			want:    []int{}, // This will vary depending on the environment
+			wantErr: false,
+		},
+		{
+			name: "Non-existent process",
+			args: args{
+				main: "nonexistentprocess",
+				hint: "",
+			},
+			want:    []int{},
+			wantErr: false,
+		},
+		{
+			name: "With hint",
+			args: args{
+				main: "bash",
+				hint: "bash",
+			},
+			want:    []int{os.Getpid()},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CapturePids(tt.args.main, tt.args.hint)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CapturePids() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("CapturePids() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+func TestPopen3Grep(t *testing.T) {
+	testCases := []struct {
+		name          string
+		cmd           string
+		musthave      string
+		mustnothave   string
+		expectedLines []string
+		expectError   bool
+	}{
+		{
+			name:          "Basic grep",
+			cmd:           "echo 'hello world'",
+			musthave:      "hello",
+			mustnothave:   "",
+			expectedLines: []string{"hello world"},
+			expectError:   false,
+		},
+		{
+			name:          "Grep with mustnothave",
+			cmd:           "echo 'hello world'",
+			musthave:      "hello",
+			mustnothave:   "world",
+			expectedLines: []string{},
+			expectError:   false,
+		},
+		{
+			name:          "Grep with multiple lines",
+			cmd:           "echo -e 'hello world\nfoo bar'",
+			musthave:      "foo",
+			mustnothave:   "",
+			expectedLines: []string{"foo bar"},
+			expectError:   false,
+		},
+		{
+			name:          "Grep with musthave and mustnothave",
+			cmd:           "echo -e 'hello world\nfoo bar'",
+			musthave:      "foo",
+			mustnothave:   "bar",
+			expectedLines: []string{},
+			expectError:   false,
+		},
+		{
+			name:          "Non-existent command",
+			cmd:           "nonexistentcommand",
+			musthave:      "",
+			mustnothave:   "",
+			expectedLines: []string{},
+			expectError:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines, err := Popen3Grep2(tc.cmd, tc.musthave, tc.mustnothave)
+			if (err != nil) != tc.expectError {
+				t.Errorf("Expected error: %v, got: %v", tc.expectError, err)
+			}
+			if !reflect.DeepEqual(lines, tc.expectedLines) {
+				t.Errorf("Expected lines: %v, got: %v", tc.expectedLines, lines)
+			}
+		})
+	}
+}
+func TestGetProcessList(t *testing.T) {
+	testCases := []struct {
+		name          string
+		mainHint      string
+		expectedError bool
+	}{
+		{
+			name:          "Existing process",
+			mainHint:      "go",
+			expectedError: false,
+		},
+		{
+			name:          "Non-existent process",
+			mainHint:      "nonexistentprocess",
+			expectedError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := GetProcessList(tc.mainHint)
+			if (err != nil) != tc.expectedError {
+				t.Errorf("Expected error: %v, got: %v", tc.expectedError, err)
+			}
+			if tc.expectedError && err == nil {
+				t.Errorf("Expected an error but got none")
+			}
+			if !tc.expectedError && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+			if !tc.expectedError && len(result) == 0 && tc.mainHint != "nonexistentprocess" {
+				t.Errorf("Expected some processes but got none")
+			}
+		})
+	}
+}
+
+// func TestCapturePids(t *testing.T) {
+// 	type args struct {
+// 		main string
+// 		hint string
+// 	}
+// 	tests := []struct {
+// 		name    string
+// 		args    args
+// 		want    []int
+// 		wantErr bool
+// 	}{
+// 		// TODO: Add test cases.
+// 	}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			got, err := CapturePids(tt.args.main, tt.args.hint)
+// 			if (err != nil) != tt.wantErr {
+// 				t.Errorf("CapturePids() error = %v, wantErr %v", err, tt.wantErr)
+// 				return
+// 			}
+// 			if !reflect.DeepEqual(got, tt.want) {
+// 				t.Errorf("CapturePids() = %v, want %v", got, tt.want)
+// 			}
+// 		})
+// 	}
+// }
