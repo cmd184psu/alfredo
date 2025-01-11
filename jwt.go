@@ -35,8 +35,8 @@ const (
 	LoginRoute             = "/login"
 	LogoutRoute            = "/logout"
 	StaticRoute            = "/*"
-	StaticDirRoute         = "./static"
-	ExpireTime             = 120 //expire JWT token in 120 minutes
+	//StaticDirRoute         = "./static"
+	ExpireTime = 120 //expire JWT token in 120 minutes
 )
 
 func ContentTypeJSON() (string, string) {
@@ -66,14 +66,15 @@ type JwtClaims struct {
 }
 
 type JwtHttpsServerStruct struct {
-	jwtKey     []byte
-	Port       int
-	Router     *chi.Mux
-	publickey  string
-	privatekey string
-	pathMap    map[string]bool
-	secure     bool
-	srv        *http.Server
+	jwtKey         []byte
+	Port           int
+	Router         *chi.Mux
+	publickey      string
+	privatekey     string
+	pathMap        map[string]bool
+	secure         bool
+	srv            *http.Server
+	StaticDirRoute string
 }
 
 func (jhs *JwtHttpsServerStruct) Init(port int) {
@@ -96,6 +97,16 @@ func (jhs JwtHttpsServerStruct) WithPort(p int) JwtHttpsServerStruct {
 }
 func (jhs JwtHttpsServerStruct) GetPort() int {
 	return jhs.Port
+}
+func (jhs *JwtHttpsServerStruct) SetStaticDirRoute(dir string) {
+	jhs.StaticDirRoute = dir
+}
+func (jhs JwtHttpsServerStruct) WithStaticDirRoute(dir string) JwtHttpsServerStruct {
+	jhs.StaticDirRoute = dir
+	return jhs
+}
+func (jhs JwtHttpsServerStruct) GetStaticDirRoute() string {
+	return jhs.StaticDirRoute
 }
 
 func (jhs *JwtHttpsServerStruct) SetKey(k []byte) {
@@ -168,7 +179,7 @@ func (jhs *JwtHttpsServerStruct) StartServer() error {
 	}
 	// Serve static files
 	if !jhs.pathMap[StaticRoute] {
-		jhs.Router.Handle(StaticRoute, http.FileServer(http.Dir(StaticDirRoute)))
+		jhs.Router.Handle(StaticRoute, http.FileServer(http.Dir(jhs.GetStaticDirRoute())))
 	}
 
 	var err error

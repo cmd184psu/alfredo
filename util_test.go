@@ -120,3 +120,62 @@ func TestCompareMaps(t *testing.T) {
 		})
 	}
 }
+
+func Test_getPassCodeFromSlice(t *testing.T) {
+	type args struct {
+		s []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "Valid passcode",
+			args: args{s: []string{"# Comment", "passcode: 12345"}},
+			want: "12345",
+		},
+		{
+			name: "Empty slice",
+			args: args{s: []string{}},
+			want: "",
+		},
+		{
+			name: "No passcode",
+			args: args{s: []string{"# Comment", "another: value"}},
+			want: "",
+		},
+		{
+			name: "Passcode with spaces",
+			args: args{s: []string{"# Comment", "passcode:  67890"}},
+			want: "67890",
+		},
+		{
+			name: "Passcode with leading spaces",
+			args: args{s: []string{"# Comment", "  passcode: 54321"}},
+			want: "54321",
+		},
+		{
+			name: "Passcode with trailing spaces",
+			args: args{s: []string{"# Comment", "passcode: 98765 "}},
+			want: "98765",
+		},
+		{
+			name: "Multiple passcodes",
+			args: args{s: []string{"# Comment", "passcode: 11111", "passcode: 22222"}},
+			want: "11111",
+		},
+		{
+			name: "Passcode with special characters",
+			args: args{s: []string{"# Comment", "passcode: @#$%^&*"}},
+			want: "@#$%^&*",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getPassCodeFromSlice(tt.args.s); got != tt.want {
+				t.Errorf("getPassCodeFromSlice(%s) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

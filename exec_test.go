@@ -161,10 +161,11 @@ func TestExecutiveSpinNoWatch(t *testing.T) {
 
 	testCases = append(testCases, tc)
 
+	cli = "./etest.sh"
 	tc.input = ex.Init().
 		WithMainExecFunc(System3toCapturedString, cli).
 		WithSpinny(false).
-		WithCapture(true).
+		WithCaptureBoth().
 		WithDirectory(".")
 	tc.note = "no spin, no watcher, capture on"
 	tc.err = nil
@@ -179,8 +180,10 @@ func TestExecutiveSpinNoWatch(t *testing.T) {
 		RemoveFile("./complete")
 		RemoveFile("./killingit")
 		result := tc.input.Execute()
-		if tc.input.capture && len(tc.input.body) == 0 {
+		if tc.input.capture != CapNone && len(tc.input.body) == 0 {
 			t.Errorf("collection was empty (fail) for %s", tc.note)
+		} else {
+			fmt.Println(tc.input.body)
 		}
 
 		if result != tc.err {

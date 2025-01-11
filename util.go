@@ -374,3 +374,38 @@ func TestHost(host string) error {
 	}
 	return nil
 }
+
+func getPassCodeFromSlice(s []string) string {
+	for i := 0; i < len(s); i++ {
+		if len(strings.TrimSpace(s[i])) == 0 {
+			continue
+		}
+		if s[i][0] == '#' {
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimSpace(strings.ToLower(s[i])), "passcode") {
+			continue
+		}
+		return strings.TrimSpace(s[i][strings.Index(s[i], ":")+1:])
+	}
+	return ""
+}
+
+func GetPassCode(filename string) (string, error) {
+	if !FileExistsEasy(filename) {
+		return "", fmt.Errorf("file %s not found", filename)
+	}
+
+	content, err := ReadFileToSlice(filename, false)
+	if err != nil {
+		return "", fmt.Errorf("file %s is not readable", filename)
+	}
+	if len(content) != 1 {
+		return "", fmt.Errorf("malformed conf file")
+	}
+	pc := getPassCodeFromSlice(content)
+	if len(pc) > 0 {
+		return pc, nil
+	}
+	return "", fmt.Errorf("no passcode found")
+}

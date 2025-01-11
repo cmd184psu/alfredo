@@ -15,13 +15,22 @@ type ExecCallBackFunc func(*string, string) error
 type ProgressCallBackFunc func(chan bool)
 type WatcherCallBackFunc func(*ExecStruct) error
 
+type CaptureType int
+
+const (
+	CapNone CaptureType = iota
+	CapBoth
+	CapStdout
+	CapStderr
+)
+
 type ExecStruct struct {
 	mainExecFunc     ExecCallBackFunc
 	mainCli          string
 	watcherExecFunc  WatcherCallBackFunc
 	progressExecFunc ProgressCallBackFunc
 	spinny           bool
-	capture          bool
+	capture          CaptureType
 	iface            interface{}
 	dir              string
 	SpinSigChan      chan bool
@@ -42,7 +51,7 @@ func (ex ExecStruct) Init() ExecStruct {
 	ex.WatchSigChan = nil
 	ex.ErrChan = nil
 	ex.progressExecFunc = Spinny
-	ex.capture = false
+	ex.capture = CapNone
 	ex.body = ""
 	ex.useSSH = false
 
@@ -77,7 +86,16 @@ func (ex ExecStruct) WithDirectory(d string) ExecStruct {
 	return ex
 }
 func (ex ExecStruct) WithCapture(c bool) ExecStruct {
-	ex.capture = c
+	if c {
+		ex.capture = CapBoth
+	} else {
+		ex.capture = CapNone
+	}
+	return ex
+}
+
+func (ex ExecStruct) WithCaptureBoth() ExecStruct {
+	ex.capture = CapBoth
 	return ex
 }
 
@@ -104,7 +122,88 @@ func (ex ExecStruct) OkToWatch() bool {
 func (ex ExecStruct) GetBody() string {
 	return ex.body
 }
+func (ex ExecStruct) captureOutput(cmd *exec.Cmd) (string, string, error) {
+	var stdoutBuf, stderrBuf strings.Builder
+	if ex.capture == CapBoth || ex.capture == CapStdout {
+		cmd.Stdout = &stdoutBuf
+	}
+	if ex.capture == CapBoth || ex.capture == CapStderr {
+		cmd.Stderr = &stderrBuf
+	}
+	err := cmd.Run()
+	return stdoutBuf.String(), stderrBuf.String(), err
+}
+
 func (ex *ExecStruct) Execute() error {
+	VerbosePrintln("Execute:: begin")
+	var err error
+	var wg sync.WaitGroup
+
+	if ex.mainExecFunc == nil && !ex.useSSH {
+		panic("missing exec call back function; ssh not configured")
+	}
+
+	if ex.spinny && ex.progressExecFunc != nil {
+		ex.SpinSigChan = make(chan bool)
+	}
+	if ex.OkToWatch() {
+		ex.WatchSigChan = make(chan bool)
+	}
+	ex.ErrChan = make(chan error)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(ex.ErrChan)
+		if ex.OkToSpin() {
+			defer close(ex.SpinSigChan)
+		}
+		if ex.OkToWatch() {
+			defer close(ex.WatchSigChan)
+		}
+		VerbosePrintln("execute:: inside closure, about to run command")
+		var e error
+		if ex.useSSH {
+			ex.ssh = ex.ssh.WithRemoteDir(ex.dir)
+			VerbosePrintln(ex.ssh.GetSSHCli() + " \"" + ex.mainCli + "\"")
+
+			e = ex.ssh.SecureRemoteExecution(ex.mainCli)
+			ex.body = ex.ssh.stdout
+		} else {
+			ex.WithDirectory(ex.dir)
+			cmd := exec.Command("sh", "-c", ex.mainCli)
+			stdout, stderr, err := ex.captureOutput(cmd)
+			if ex.capture == CapBoth || ex.capture == CapStdout {
+				ex.body = stdout
+			}
+			if ex.capture == CapBoth || ex.capture == CapStderr {
+				ex.body += stderr
+			}
+			e = err
+			VerbosePrintln("mainExecFunc completed")
+			time.Sleep(5 * time.Second)
+		}
+		if ex.capture == CapNone && e == nil {
+			_, e = io.Copy(os.Stdout, strings.NewReader(ex.body))
+		}
+		VerbosePrintln("execute:: inside closure, cmd is complete")
+		if ex.spinny {
+			ex.SpinSigChan <- true
+		}
+		ex.ErrChan <- e
+	}()
+	if ex.OkToSpin() {
+		go ex.progressExecFunc(ex.SpinSigChan)
+	}
+	if ex.OkToWatch() {
+		go ex.watcherExecFunc(ex)
+	}
+	err = <-ex.ErrChan
+	wg.Wait()
+
+	VerbosePrintln("execute:: the wait is over")
+	return err
+}
+func (ex *ExecStruct) ExecuteOLD() error {
 	VerbosePrintln("Execute:: begin")
 	var err error
 	var wg sync.WaitGroup
@@ -144,9 +243,9 @@ func (ex *ExecStruct) Execute() error {
 			VerbosePrintln("mainExecFunc completed")
 			time.Sleep(5 * time.Second)
 		}
-		if !ex.capture && e == nil {
-			_, e = io.Copy(os.Stdout, strings.NewReader(ex.body))
-		}
+		// if !ex.capture && e == nil {
+		// 	_, e = io.Copy(os.Stdout, strings.NewReader(ex.body))
+		// }
 		VerbosePrintln("execute:: inside closure, cmd is complete")
 		if ex.spinny {
 			ex.SpinSigChan <- true
