@@ -278,7 +278,7 @@ func FileBaseContainsDate(f string) bool {
 		}
 	}
 
-	fmt.Println("# exhausted all options, returning false")
+	VerbosePrintln("# exhausted all options, returning false")
 	return false
 }
 

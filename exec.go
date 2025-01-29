@@ -39,6 +39,7 @@ type ExecStruct struct {
 	body             string
 	ssh              SSHStruct
 	useSSH           bool
+	request          string
 }
 
 func (ex ExecStruct) Init() ExecStruct {
@@ -99,14 +100,44 @@ func (ex ExecStruct) WithCaptureBoth() ExecStruct {
 	return ex
 }
 
-func (ex ExecStruct) WithSSH(ssh SSHStruct, cli string) ExecStruct {
-	ex.ssh = ssh
-	ex.mainCli = cli
-	ex.mainExecFunc = nil
-	ex.useSSH = true
+func (ex ExecStruct) WithRequest(r string) ExecStruct {
+	ex.SetRequest(r)
 	return ex
 }
 
+func (ex *ExecStruct) SetRequest(r string) {
+	ex.request = r
+}
+
+func (ex ExecStruct) GetRequest() string {
+	return ex.request
+}
+
+func (ex *ExecStruct) SetSSH(ssh SSHStruct) {
+	ex.ssh = ssh
+	ex.mainExecFunc = nil
+	ex.useSSH = true
+}
+
+func (ex ExecStruct) WithSSH(ssh SSHStruct) ExecStruct {
+	ex.SetSSH(ssh)
+	return ex
+}
+func (ex ExecStruct) GetSSH() SSHStruct {
+	return ex.ssh
+}
+
+func (ex ExecStruct) GetMainCli() string {
+	return ex.mainCli
+}
+func (ex *ExecStruct) SetMainCli(cli string) {
+	ex.mainCli = cli
+}
+
+func (ex ExecStruct) WithMainCli(cli string) ExecStruct {
+	ex.SetMainCli(cli)
+	return ex
+}
 func (ex ExecStruct) GetIface() interface{} {
 	return ex.iface
 }
@@ -134,6 +165,48 @@ func (ex ExecStruct) captureOutput(cmd *exec.Cmd) (string, string, error) {
 	return stdoutBuf.String(), stderrBuf.String(), err
 }
 
+/*
+	func pipeCommandExecution(requestPayload string, commandToExecute string) (string, error) {
+		// Split the command and arguments
+		cmdParts := strings.Fields(commandToExecute)
+		if len(cmdParts) == 0 {
+			return "", fmt.Errorf("empty command")
+		}
+
+		// Create a pipe
+		pipeReader, pipeWriter := io.Pipe()
+
+		// Create the command
+		cmd := exec.Command(cmdParts[0], cmdParts[1:]...)
+		cmd.Stdin = pipeReader
+
+		// Create a buffer to capture the output
+		var outputBuffer bytes.Buffer
+		cmd.Stdout = &outputBuffer
+
+		// Start the command
+		err := cmd.Start()
+		if err != nil {
+			return "", fmt.Errorf("error starting command: %w", err)
+		}
+
+		// Write the payload to the pipe in a separate goroutine
+		go func() {
+			defer pipeWriter.Close()
+			io.WriteString(pipeWriter, requestPayload)
+		}()
+
+		// Wait for the command to finish
+		err = cmd.Wait()
+		if err != nil {
+			return "", fmt.Errorf("error running command: %w", err)
+		}
+
+		// Return the output as a string
+		return outputBuffer.String(), nil
+	}
+*/
+
 func (ex *ExecStruct) Execute() error {
 	VerbosePrintln("Execute:: begin")
 	var err error
@@ -142,7 +215,6 @@ func (ex *ExecStruct) Execute() error {
 	if ex.mainExecFunc == nil && !ex.useSSH {
 		panic("missing exec call back function; ssh not configured")
 	}
-
 	if ex.spinny && ex.progressExecFunc != nil {
 		ex.SpinSigChan = make(chan bool)
 	}
@@ -165,12 +237,179 @@ func (ex *ExecStruct) Execute() error {
 		if ex.useSSH {
 			ex.ssh = ex.ssh.WithRemoteDir(ex.dir)
 			VerbosePrintln(ex.ssh.GetSSHCli() + " \"" + ex.mainCli + "\"")
+			if len(ex.request) > 0 {
+				ex.ssh.SetRequest(ex.request)
+			}
+			e = ex.ssh.Execute(ex.mainCli)
+			ex.body = ex.ssh.stdout
+		} else {
+			cmd := exec.Command("sh", "-c", ex.mainCli)
+			if len(ex.request) > 0 {
+				pipeReader, pipeWriter := io.Pipe()
+				cmd.Stdin = pipeReader
+				go func() {
+					defer pipeWriter.Close()
+					io.WriteString(pipeWriter, ex.request)
+				}()
+			}
+			stdout, stderr, err := ex.captureOutput(cmd)
+			if ex.capture == CapBoth || ex.capture == CapStdout {
+				ex.body = stdout
+			}
+			if ex.capture == CapBoth || ex.capture == CapStderr {
+				ex.body += stderr
+			}
+			e = err
+			VerbosePrintln("mainExecFunc completed")
+		}
+		if ex.capture == CapNone && e == nil {
+			_, e = io.Copy(os.Stdout, strings.NewReader(ex.body))
+		}
+		VerbosePrintln("execute:: inside closure, cmd is complete")
+		if ex.spinny {
+			ex.SpinSigChan <- true
+		}
+		ex.ErrChan <- e
+	}()
+	if ex.OkToSpin() {
+		go ex.progressExecFunc(ex.SpinSigChan)
+	}
+	if ex.OkToWatch() {
+		go ex.watcherExecFunc(ex)
+	}
+	err = <-ex.ErrChan
+	wg.Wait()
+
+	VerbosePrintln("execute:: the wait is over")
+	return err
+}
+
+func (ex *ExecStruct) ExecuteSTILLBROKEN() error {
+	VerbosePrintln("Execute:: begin")
+	var err error
+	var wg sync.WaitGroup
+
+	if ex.mainExecFunc == nil && !ex.useSSH {
+		panic("missing exec call back function; ssh not configured")
+	}
+	if ex.spinny && ex.progressExecFunc != nil {
+		ex.SpinSigChan = make(chan bool)
+	}
+	if ex.OkToWatch() {
+		ex.WatchSigChan = make(chan bool)
+	}
+	ex.ErrChan = make(chan error)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(ex.ErrChan)
+		if ex.OkToSpin() {
+			defer close(ex.SpinSigChan)
+		}
+		if ex.OkToWatch() {
+			defer close(ex.WatchSigChan)
+		}
+		VerbosePrintln("execute:: inside closure, about to run command")
+		var e error
+		if ex.useSSH {
+			ex.ssh = ex.ssh.WithRemoteDir(ex.dir)
+			VerbosePrintln(ex.ssh.GetSSHCli() + " \"" + ex.mainCli + "\"")
+			e = ex.ssh.SecureRemoteExecution(ex.mainCli)
+			ex.body = ex.ssh.stdout
+		} else {
+			cmd := exec.Command("sh", "-c", ex.mainCli)
+			if len(ex.request) > 0 {
+				pipeReader, pipeWriter := io.Pipe()
+				cmd.Stdin = pipeReader
+				go func() {
+					defer pipeWriter.Close()
+					io.WriteString(pipeWriter, ex.request)
+				}()
+			}
+			stdout, stderr, err := ex.captureOutput(cmd)
+			if ex.capture == CapBoth || ex.capture == CapStdout {
+				ex.body = stdout
+			}
+			if ex.capture == CapBoth || ex.capture == CapStderr {
+				ex.body += stderr
+			}
+			e = err
+			VerbosePrintln("mainExecFunc completed")
+			time.Sleep(5 * time.Second)
+		}
+		if ex.capture == CapNone && e == nil {
+			_, e = io.Copy(os.Stdout, strings.NewReader(ex.body))
+		}
+		VerbosePrintln("execute:: inside closure, cmd is complete")
+		if ex.spinny {
+			ex.SpinSigChan <- true
+		}
+		ex.ErrChan <- e
+	}()
+	if ex.OkToSpin() {
+		go ex.progressExecFunc(ex.SpinSigChan)
+	}
+	if ex.OkToWatch() {
+		go ex.watcherExecFunc(ex)
+	}
+	err = <-ex.ErrChan
+	wg.Wait()
+
+	VerbosePrintln("execute:: the wait is over")
+	return err
+}
+func (ex *ExecStruct) ExecutePRE17Jan2025() error {
+	VerbosePrintln("Execute:: begin")
+	var err error
+	var wg sync.WaitGroup
+
+	if ex.mainExecFunc == nil && !ex.useSSH {
+		panic("missing exec call back function; ssh not configured")
+	}
+	if ex.spinny && ex.progressExecFunc != nil {
+		ex.SpinSigChan = make(chan bool)
+	}
+	if ex.OkToWatch() {
+		ex.WatchSigChan = make(chan bool)
+	}
+	ex.ErrChan = make(chan error)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(ex.ErrChan)
+		if ex.OkToSpin() {
+			defer close(ex.SpinSigChan)
+		}
+		if ex.OkToWatch() {
+			defer close(ex.WatchSigChan)
+		}
+		VerbosePrintln("execute:: inside closure, about to run command")
+		var e error
+		var pipeReader *io.PipeReader
+		var pipeWriter *io.PipeWriter
+		if ex.useSSH {
+			ex.ssh = ex.ssh.WithRemoteDir(ex.dir)
+			VerbosePrintln(ex.ssh.GetSSHCli() + " \"" + ex.mainCli + "\"")
 
 			e = ex.ssh.SecureRemoteExecution(ex.mainCli)
 			ex.body = ex.ssh.stdout
 		} else {
+
+			if len(ex.request) > 0 {
+				pipeReader, pipeWriter = io.Pipe()
+
+			}
 			ex.WithDirectory(ex.dir)
 			cmd := exec.Command("sh", "-c", ex.mainCli)
+
+			if len(ex.request) > 0 {
+				cmd.Stdin = pipeReader
+				go func() {
+					defer pipeWriter.Close()
+					io.WriteString(pipeWriter, ex.request)
+				}()
+			}
+
 			stdout, stderr, err := ex.captureOutput(cmd)
 			if ex.capture == CapBoth || ex.capture == CapStdout {
 				ex.body = stdout

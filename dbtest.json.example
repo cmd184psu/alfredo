@@ -1,0 +1,7 @@
+{
+  "db_path": "/path/to/database",
+  "table": "users",
+  "ssh_host": "example.com",
+  "ssh_key": "/home/user/.ssh/id_rsa"
+}
+

@@ -633,3 +633,12 @@ func DeepCopyStringToPointer(s string) *string {
 	// Return the address of the new string
 	return &newString
 }
+
+func PairToMap(k, v string) map[string]string {
+	var m = make(map[string]string)
+
+	if len(k) > 0 && len(v) > 0 {
+		m[k] = v
+	}
+	return m
+}

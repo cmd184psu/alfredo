@@ -71,7 +71,8 @@ func TestExecutiveOverSSH(t *testing.T) {
 
 	var exe ExecStruct
 	exe = exe.Init().
-		WithSSH(ssh, "ls -lah").
+		WithSSH(ssh).
+		WithMainCli("ls -lah").
 		WithSpinny(true).
 		WithCapture(false).
 		WithDirectory(".")
@@ -116,58 +117,91 @@ func donothing(ex *ExecStruct) error {
 
 func TestExecutiveSpinNoWatch(t *testing.T) {
 	var ex ExecStruct
-	var d dumbStruct
+	//var d dumbStruct
 	var tc testCaseStruct
 	var testCases []testCaseStruct
 	cli := "stat exec.go"
-	d.cli = "ls -lah"
+	// d.cli = "ls -lah"
+	// tc.input = ex.Init().
+	// 	WithMainExecFunc(System3toCapturedString, cli).
+	// 	WithWatcherExecFunc(donothing).
+	// 	WithHintInterface(d).
+	// 	WithSpinny(false).
+	// 	WithDirectory(".")
+	// tc.note = "no spin, with watcher"
+	// tc.err = nil
+
+	// testCases = append(testCases, tc)
+
+	// tc.input = ex.Init().
+	// 	WithMainExecFunc(System3toCapturedString, cli).
+	// 	WithWatcherExecFunc(donothing).
+	// 	WithHintInterface(d).
+	// 	WithSpinny(true).
+	// 	WithDirectory(".")
+	// tc.note = "with spin, with watcher"
+	// tc.err = nil
+
+	// testCases = append(testCases, tc)
+
+	// tc.input = ex.Init().
+	// 	WithMainExecFunc(System3toCapturedString, cli).
+	// 	WithSpinny(true).
+	// 	WithDirectory(".")
+	// tc.note = "with spin, no watcher"
+	// tc.err = nil
+
+	// testCases = append(testCases, tc)
+
+	// tc.input = ex.Init().
+	// 	WithMainExecFunc(System3toCapturedString, cli).
+	// 	WithSpinny(false).
+	// 	WithDirectory(".")
+	// tc.note = "no spin, no watcher"
+	// tc.err = nil
+
+	// testCases = append(testCases, tc)
+
+	// cli = "./etest.sh"
+	// tc.input = ex.Init().
+	// 	WithMainExecFunc(System3toCapturedString, cli).
+	// 	WithSpinny(false).
+	// 	WithCaptureBoth().
+	// 	WithDirectory(".")
+	// tc.note = "no spin, no watcher, capture on"
+	// tc.err = nil
+
+	// testCases = append(testCases, tc)
+
+	// cli = "md5sum"
+	// tc.input = ex.Init().
+	// 	WithMainExecFunc(System3toCapturedString, cli).
+	// 	WithSpinny(false).
+	// 	WithCaptureBoth().
+	// 	WithRequest("5555").
+	// 	WithDirectory(".")
+	// tc.note = "echo to command with popen and capture output"
+
+	// tc.err = nil
+
+	// testCases = append(testCases, tc)
+
+	var ssh SSHStruct
+	ssh.Host = "localhost"
+	ssh.User = os.Getenv("USER")
+	ssh.Key = os.Getenv("HOME") + "/.ssh/id_rsa"
+
+	cli = "/usr/local/bin/md5sum"
 	tc.input = ex.Init().
-		WithMainExecFunc(System3toCapturedString, cli).
-		WithWatcherExecFunc(donothing).
-		WithHintInterface(d).
-		WithSpinny(false).
-		WithDirectory(".")
-	tc.note = "no spin, with watcher"
-	tc.err = nil
-
-	testCases = append(testCases, tc)
-
-	tc.input = ex.Init().
-		WithMainExecFunc(System3toCapturedString, cli).
-		WithWatcherExecFunc(donothing).
-		WithHintInterface(d).
-		WithSpinny(true).
-		WithDirectory(".")
-	tc.note = "with spin, with watcher"
-	tc.err = nil
-
-	testCases = append(testCases, tc)
-
-	tc.input = ex.Init().
-		WithMainExecFunc(System3toCapturedString, cli).
-		WithSpinny(true).
-		WithDirectory(".")
-	tc.note = "with spin, no watcher"
-	tc.err = nil
-
-	testCases = append(testCases, tc)
-
-	tc.input = ex.Init().
-		WithMainExecFunc(System3toCapturedString, cli).
-		WithSpinny(false).
-		WithDirectory(".")
-	tc.note = "no spin, no watcher"
-	tc.err = nil
-
-	testCases = append(testCases, tc)
-
-	cli = "./etest.sh"
-	tc.input = ex.Init().
-		WithMainExecFunc(System3toCapturedString, cli).
+		//		WithMainExecFunc(System3toCapturedString, cli).
+		WithMainCli(cli).
 		WithSpinny(false).
 		WithCaptureBoth().
-		WithDirectory(".")
-	tc.note = "no spin, no watcher, capture on"
+		WithRequest("5555").
+		WithDirectory(".").
+		WithSSH(ssh)
+	tc.note = "echo to command with popen and capture output"
+
 	tc.err = nil
 
 	testCases = append(testCases, tc)

@@ -10,12 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
-	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -60,6 +60,8 @@ type S3ClientSession struct {
 	forceSSL       bool
 	logging        bool
 	maxConcurrency int
+	skipSize       int64
+	Response       *http.Response
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
@@ -119,6 +121,19 @@ func (s3c S3ClientSession) WithRegion(r string) S3ClientSession {
 func (this S3ClientSession) SetVersioning(v bool) S3ClientSession {
 	this.Versioning = v
 	return this
+}
+
+func (s3c *S3ClientSession) SetSkipSize(sz int64) {
+	s3c.skipSize = sz
+}
+
+func (s3c S3ClientSession) WithSkipSize(sz int64) S3ClientSession {
+	s3c.skipSize = sz
+	return s3c
+}
+
+func (s3c S3ClientSession) GetSkipSize() int64 {
+	return s3c.skipSize
 }
 
 func (s3c S3ClientSession) KeepBucket() S3ClientSession {
@@ -306,6 +321,7 @@ func (s3c *S3ClientSession) createBucketWithPolicy() error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
+	s3c.Response = resp
 	VerbosePrintln("\n\n\nEND::s3.createBucketWithPolicy()")
 
 	return nil
@@ -1075,6 +1091,10 @@ func (sourceS3 S3ClientSession) CopyAllObjects(
 					}
 					if result.Success {
 						log.Printf("Uploaded object to s3://%s/%s", targetS3.Bucket, result.SourceKey)
+					} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
+						log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded", targetS3.Bucket, result.SourceKey)
+					} else {
+						log.Printf("Failed to upload object to s3://%s/%s: %v", targetS3.Bucket, result.SourceKey, result.Error)
 					}
 					resultsChan <- result
 				}(key)
@@ -1147,6 +1167,12 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 		return fmt.Errorf("failed to get source object details: %v", err)
 	}
 
+	if *headOutputSrc.ContentLength > sourceS3.skipSize && sourceS3.skipSize > 0 {
+		log.Printf("Skipping object s3://%s/%s, as it exceeds imposed size of limit of ( %d bytes ) %s\n", sourceS3.Bucket, sourceKey, sourceS3.skipSize, HumanReadableStorageCapacity(sourceS3.skipSize))
+		atomic.AddInt64(&progress.SkippedObjects, 1)
+		return fmt.Errorf("skip size exceeded")
+	}
+
 	if *headOutputSrc.ContentLength > defaultPartSizeMax*10000 {
 		return fmt.Errorf("content length of %d is too large to process", *headOutputSrc.ContentLength)
 	}
@@ -1159,7 +1185,7 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	if err == nil {
 		VerbosePrintf("headOutputTgt: Etag: %s", *headOutputTgt.ETag)
 		if !GetForce() {
-			log.Printf("Skipping object s3://%s/%s, already exists on target", targetS3.Bucket, targetKey)
+			log.Printf("Skipping object s3://%s/%s, already exists on target\n", targetS3.Bucket, targetKey)
 			VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
 			atomic.AddInt64(&progress.SkippedObjects, 1)
 			VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
@@ -1182,6 +1208,7 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 
 		body, err := io.ReadAll(getOutput.Body)
 		if err != nil {
+			fmt.Printf("Error reading body, err=%s\n", err.Error())
 			return err
 		}
 		defer getOutput.Body.Close()
@@ -1428,25 +1455,29 @@ func (sourceS3 S3ClientSession) SetBucketACL(aclJson string) error {
 // fmt.Printf("MD5 hash of the byte range %d-%d: %s\n", R, R+chunk-1, hashString)
 // return nil
 
-func (s3c *S3ClientSession) GetHashOfObjectRange(chunk int64) (string, error) {
+func (s3c *S3ClientSession) GetSizeOfObject() (int64, error) {
 	headObjectOutput, err := s3c.Client.HeadObject(&s3.HeadObjectInput{
 		Bucket: &s3c.Bucket,
 		Key:    &s3c.ObjectKey,
 	})
 	if err != nil {
+		return 0, err
+	}
+	return *headObjectOutput.ContentLength, nil
+}
+
+func (s3c *S3ClientSession) GetHashOfObjectRange(fromChunk int64, chunkSize int64) (string, error) {
+	size, err := s3c.GetSizeOfObject()
+
+	if err != nil {
 		return "", err
 	}
 
-	size := *headObjectOutput.ContentLength
-	// rand.Seed(time.Now().UnixNano())
-	var rando int64
-	for {
-		rando = rand.Int63n(size)
-		if rando+chunk < size {
-			break
-		}
+	if fromChunk+chunkSize > size {
+		return "", fmt.Errorf("chunk size exceeds object size")
 	}
-	rangeHeader := fmt.Sprintf("bytes=%d-%d", rando, rando+chunk-1)
+
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", fromChunk, fromChunk+chunkSize-1)
 	getObjectOutput, err := s3c.Client.GetObject(&s3.GetObjectInput{
 		Bucket: &s3c.Bucket,
 		Key:    &s3c.ObjectKey,
@@ -1464,4 +1495,175 @@ func (s3c *S3ClientSession) GetHashOfObjectRange(chunk int64) (string, error) {
 	hashInBytes := hash.Sum(nil)[:16]
 	hashString := hex.EncodeToString(hashInBytes)
 	return hashString, nil
+}
+
+type LifecycleConfiguration struct {
+	XMLName xml.Name `xml:"LifecycleConfiguration"`
+	Rules   []Rule   `xml:"Rule"`
+}
+
+// Rule represents a single rule in the lifecycle configuration
+type Rule struct {
+	ID                    string                        `xml:"ID,omitempty"`
+	Status                string                        `xml:"Status"`
+	Filter                Filter                        `xml:"Filter"`
+	Transitions           []Transition                  `xml:"Transition,omitempty"`
+	Expiration            *Expiration                   `xml:"Expiration,omitempty"`
+	NoncurrentTransitions []NoncurrentVersionTransition `xml:"NoncurrentVersionTransition,omitempty"`
+	NoncurrentExpiration  *NoncurrentVersionExpiration  `xml:"NoncurrentVersionExpiration,omitempty"`
+}
+
+// Filter represents the filter for a rule
+type Filter struct {
+	Prefix string `xml:"Prefix,omitempty"`
+}
+
+// Transition represents a transition in a rule
+type Transition struct {
+	Days         int    `xml:"Days,omitempty"`
+	StorageClass string `xml:"StorageClass"`
+	Date         string `xml:"Date,omitempty"`
+}
+
+// Expiration represents an expiration in a rule
+type Expiration struct {
+	Days int    `xml:"Days,omitempty"`
+	Date string `xml:"Date,omitempty"`
+}
+
+// NoncurrentVersionTransition represents a transition for noncurrent versions
+type NoncurrentVersionTransition struct {
+	NoncurrentDays int    `xml:"NoncurrentDays"`
+	StorageClass   string `xml:"StorageClass"`
+}
+
+// NoncurrentVersionExpiration represents an expiration for noncurrent versions
+type NoncurrentVersionExpiration struct {
+	NoncurrentDays int `xml:"NoncurrentDays"`
+}
+
+func (s3c *S3ClientSession) DeleteBucketLifeCyclePolicy(rulename string) error {
+	VerbosePrintf("\n\n\nBEGIN::s3.DeleteBucketLifeCyclePolicy(%s)", rulename)
+	// Prepare the request URL
+	req, _ := s3c.Client.DeleteBucketLifecycleRequest(&s3.DeleteBucketLifecycleInput{
+		Bucket: aws.String(s3c.Bucket),
+		//		ID:     aws.String(rulename),
+	})
+	VerbosePrintf("\n\n\nEND::s3.DeleteBucketLifeCyclePolicy(%s)", rulename)
+
+	return req.Send()
+}
+
+func (s3c *S3ClientSession) GenerateLifeCycleRules(n int) (LifecycleConfiguration, error) {
+	var blc LifecycleConfiguration
+	blc.Rules = make([]Rule, n)
+	for i := 0; i < n; i++ {
+		blc.Rules[i].ID = fmt.Sprintf("rule-%d", i)
+		blc.Rules[i].Filter.Prefix = "documents/"
+		blc.Rules[i].Status = "Enabled"
+		blc.Rules[i].Transitions = make([]Transition, 1)
+		blc.Rules[i].Transitions[0].Days = 30
+		blc.Rules[i].Transitions[0].StorageClass = "GLACIER"
+		blc.Rules[i].Expiration = &Expiration{}
+
+	}
+	return blc, nil
+}
+
+func calculateContentMD5(xmlBytes []byte) string {
+	md5Sum := md5.Sum(xmlBytes)
+	return base64.StdEncoding.EncodeToString(md5Sum[:])
+}
+
+func (blc *LifecycleConfiguration) ToByteArray() []byte {
+	data, err := xml.MarshalIndent(blc, "", "  ")
+
+	if err != nil {
+		panic(err)
+	}
+	return []byte(xml.Header + string(data))
+}
+
+func (blc *LifecycleConfiguration) String() string {
+	return string(blc.ToByteArray())
+}
+
+func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration, extraHeaders map[string]string) error {
+	VerbosePrintln("\n\n\nBEGIN::s3.PutBucketLifeCyclePolicy()")
+	VerbosePrintf("s3c.Endpoint: %s", s3c.Endpoint)
+	VerbosePrintf("s3c.Bucket: %s", s3c.Bucket)
+	VerbosePrintf("s3c.Credentials.AccessKey: %s", s3c.Credentials.AccessKey)
+	VerbosePrintf("s3c.Credentials.SecretKey: %s", s3c.Credentials.SecretKey)
+	VerbosePrintf("s3c.Region: %s", s3c.Region)
+
+	// Prepare the request URL
+	url := fmt.Sprintf("%s/%s", s3c.Endpoint, s3c.Bucket)
+
+	// Prepare the request body (empty for bucket creation)
+	requestBody := blc.ToByteArray()
+
+	VerbosePrintln("=======begin requestBody========")
+	VerbosePrintln(string(requestBody))
+	VerbosePrintln("=======end requestBody========")
+
+	//stuff jsonData into requestBody, my marshalling and unmarshalling it
+	//hash := alfredo.MD5SumString(string(requestBody))
+
+	// Usage
+	contentMD5 := calculateContentMD5(requestBody)
+
+	fmt.Printf("contentMD5: %q\n", contentMD5)
+
+	// Create a new HTTP request
+	req, err := http.NewRequest(http.MethodPut, url+"?lifecycle", bytes.NewReader(requestBody))
+	if err != nil {
+		return err
+	}
+
+	// Set the custom header
+	now := time.Now().UTC()
+
+	// Format the date according to RFC1123
+	date := now.Format(time.RFC1123)
+	// Concatenate the string to sign
+
+	// 	StringToSign="$method\n$contentMD5\n$contentType\n$httpDate\n${xamzHeadersToSign}${resource}";
+
+	//Wed, 27 Mar 2024 21:12:45 UTC
+	date = strings.ReplaceAll(date, "UTC", "+0000")
+
+	req.Header.Set("Date", date)
+	//	req.Header.Set("x-gmt-policyid", s3c.PolicyId)
+
+	contentType := "text/xml"
+
+	stringToSign := fmt.Sprintf("PUT\n%s\n%s\n%s\n/%s?lifecycle", contentMD5, contentType, date, s3c.Bucket)
+	//fmt.Println("hash: ", contentMD5)
+	for name, value := range extraHeaders {
+		req.Header.Set(name, value)
+	}
+
+	req.Header.Set("Content-MD5", contentMD5)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+GenerateSignature(stringToSign, s3c.Credentials.SecretKey))
+
+	// Execute the HTTP request
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check the response status code
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	s3c.Response = resp
+	VerbosePrintln("\n\n\nEND::s3.createbuckethw()")
+
+	return nil
 }

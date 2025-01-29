@@ -37,3 +37,14 @@ func GetFormattedTime(fmt string) string {
 func GetFormattedTime1() string {
 	return GetFormattedTime(TIME_FORMAT_1)
 }
+
+func GetFirstOfMonthTimestamp() string {
+	// Get the current time in the local timezone
+	now := time.Now()
+
+	// Create a new time.Time for the first day of the current month at midnight
+	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	// Format the time as per the specified format
+	return firstOfMonth.Format("2006-01-02T15:04:05.000Z")
+}

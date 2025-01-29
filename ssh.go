@@ -62,6 +62,8 @@ type SSHStruct struct {
 	exitCode       int
 	ccmode         CrossCopyModeType
 	ConnectTimeout int `json:"connettimeout"` //ssh -o ConnectTimeout=10
+	request        string
+	//parentExe      *ExecStruct
 }
 
 const (
@@ -546,6 +548,18 @@ func (s *SSHStruct) SetCapture(c bool) SSHStruct {
 	s.capture = c
 	return *s
 }
+
+func (s SSHStruct) GetRequest() string {
+	return s.request
+}
+func (s *SSHStruct) SetRequest(r string) {
+	s.request = r
+}
+func (s SSHStruct) WithRequest(r string) SSHStruct {
+	s.SetRequest(r)
+	return s
+}
+
 func (s SSHStruct) WithSilent(c bool) SSHStruct {
 	s.silent = c
 	return s
@@ -600,6 +614,13 @@ func (s SSHStruct) MkdirAll(dir string) error {
 
 func (s SSHStruct) Chown(uid int, gid int, path string) error {
 	return s.SecureRemoteExecution(fmt.Sprintf(chown_r_fmt, uid, gid, path))
+}
+
+func (s *SSHStruct) Execute(cli string) error {
+	if len(s.request) > 0 {
+		return s.SecureRemotePipeExecution([]byte(s.request), cli)
+	}
+	return s.SecureRemoteExecution(cli)
 }
 
 func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error {
