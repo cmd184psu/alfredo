@@ -642,3 +642,28 @@ func PairToMap(k, v string) map[string]string {
 	}
 	return m
 }
+
+func StringContainsInCSV(s string, csv string) bool {
+	if len(csv) == 0 {
+		return false
+	}
+	for _, item := range strings.Split(csv, ",") {
+		if len(item) == 0 {
+			continue
+		}
+		if strings.Contains(s, item) {
+			return true
+		}
+	}
+	return false
+}
+
+func SliceToDoc(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	if len(s) == 1 {
+		return s[0]
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " and " + s[len(s)-1]
+}

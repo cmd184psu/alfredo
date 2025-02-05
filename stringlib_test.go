@@ -176,6 +176,96 @@ func TestFilterLines(t *testing.T) {
 		t.Errorf("Expected %v, got %v", expected, result)
 	}
 }
+func TestStringContainsInCSV(t *testing.T) {
+	tests := []struct {
+		name     string
+		s        string
+		csv      string
+		expected bool
+	}{
+		{
+			name:     "String contains item in CSV",
+			s:        "hello world",
+			csv:      "hello,world",
+			expected: true,
+		},
+		{
+			name:     "String does not contain item in CSV",
+			s:        "goodbye woorld",
+			csv:      "hello,world",
+			expected: false,
+		},
+		{
+			name:     "Empty CSV string",
+			s:        "hello world",
+			csv:      "",
+			expected: false,
+		},
+		{
+			name:     "Empty input string",
+			s:        "",
+			csv:      "hello,world",
+			expected: false,
+		},
+		{
+			name:     "CSV contains empty item",
+			s:        "hello world",
+			csv:      "hello,,world",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StringContainsInCSV(tt.s, tt.csv)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+func TestSliceToDoc(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected string
+	}{
+		{
+			name:     "Empty slice",
+			input:    []string{},
+			expected: "",
+		},
+		{
+			name:     "Single element slice",
+			input:    []string{"apple"},
+			expected: "apple",
+		},
+		{
+			name:     "Two elements slice",
+			input:    []string{"apple", "banana"},
+			expected: "apple and banana",
+		},
+		{
+			name:     "Multiple elements slice",
+			input:    []string{"apple", "banana", "cherry"},
+			expected: "apple, banana and cherry",
+		},
+		{
+			name:     "Multiple elements slice with more items",
+			input:    []string{"apple", "banana", "cherry", "date"},
+			expected: "apple, banana, cherry and date",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SliceToDoc(tt.input)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
 
 // Helper function to compare slices
 func equalSlices(a, b []string) bool {

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Untar takes a destination path and a reader; a tar reader loops over the tarfile
@@ -99,7 +98,7 @@ func Targz(sourceDir string, outputFilename string, leaveout string) error {
 
 	// Walk through the source directory and add files to the tar archive
 	err = filepath.Walk(sourceDir, func(filePath string, info os.FileInfo, err error) error {
-		if strings.Contains(filePath, leaveout) {
+		if StringContainsInCSV(filePath, leaveout) {
 			return nil
 		}
 

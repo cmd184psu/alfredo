@@ -1144,6 +1144,12 @@ func CalculateTotalParts(objectSize, partSize int64) int {
 	return int(math.Ceil(float64(objectSize) / float64(partSize)))
 }
 
+func tgtComesAfterSrc(tgt, src s3.HeadObjectOutput) bool {
+	tgtTime := *tgt.LastModified
+	srcTime := *src.LastModified
+	return tgtTime.After(srcTime)
+}
+
 // CopyObjectBetweenBuckets copies a single object between S3-compatible systems
 func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	targetS3 *S3ClientSession,
@@ -1184,8 +1190,8 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	VerbosePrintf("headOutputSrc: Etag: %s", *headOutputSrc.ETag)
 	if err == nil {
 		VerbosePrintf("headOutputTgt: Etag: %s", *headOutputTgt.ETag)
-		if !GetForce() {
-			log.Printf("Skipping object s3://%s/%s, already exists on target\n", targetS3.Bucket, targetKey)
+		if !GetForce() && tgtComesAfterSrc(*headOutputTgt, *headOutputSrc) {
+			log.Printf("Skipping object s3://%s/%s, target is newer than source\n", targetS3.Bucket, targetKey)
 			VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
 			atomic.AddInt64(&progress.SkippedObjects, 1)
 			VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
@@ -1515,7 +1521,7 @@ type Rule struct {
 
 // Filter represents the filter for a rule
 type Filter struct {
-	Prefix string `xml:"Prefix,omitempty"`
+	Prefix string `xml:"Prefix"`
 }
 
 // Transition represents a transition in a rule
@@ -1559,12 +1565,11 @@ func (s3c *S3ClientSession) GenerateLifeCycleRules(n int) (LifecycleConfiguratio
 	blc.Rules = make([]Rule, n)
 	for i := 0; i < n; i++ {
 		blc.Rules[i].ID = fmt.Sprintf("rule-%d", i)
-		blc.Rules[i].Filter.Prefix = "documents/"
+		blc.Rules[i].Filter.Prefix = ""
 		blc.Rules[i].Status = "Enabled"
 		blc.Rules[i].Transitions = make([]Transition, 1)
-		blc.Rules[i].Transitions[0].Days = 30
 		blc.Rules[i].Transitions[0].StorageClass = "GLACIER"
-		blc.Rules[i].Expiration = &Expiration{}
+		blc.Rules[i].Expiration = nil
 
 	}
 	return blc, nil
@@ -1640,6 +1645,7 @@ func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration,
 	stringToSign := fmt.Sprintf("PUT\n%s\n%s\n%s\n/%s?lifecycle", contentMD5, contentType, date, s3c.Bucket)
 	//fmt.Println("hash: ", contentMD5)
 	for name, value := range extraHeaders {
+		VerbosePrintf("name: %q, value: %q", name, value)
 		req.Header.Set(name, value)
 	}
 
