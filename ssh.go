@@ -366,6 +366,10 @@ func getExitCode(s string) int {
 	return e
 }
 func (s *SSHStruct) SecureRemoteExecution(cli string) error {
+	if GetDryRun() {
+		fmt.Printf("DRYRUN: %s\n", s.GetSSHCli()+" \""+cli+"\"")
+		return nil
+	}
 	s.SetDefaults()
 	// Replace with your remote server's SSH configuration
 	if len(s.Host) == 0 {
@@ -624,6 +628,11 @@ func (s *SSHStruct) Execute(cli string) error {
 }
 
 func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error {
+	if GetDryRun() {
+		fmt.Printf("DRYRUN: send %s over pipe to %s\n", string(content), cli)
+		return nil
+	}
+
 	VerbosePrintln("!!! SecureRemotePipeExecution(...) !!!")
 	// SSH configuration
 	// keyBytes, err := os.ReadFile(s.Key)

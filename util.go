@@ -29,6 +29,7 @@ import (
 var verbose bool
 var force bool
 var debugVar bool
+var dryrunVar bool
 var panicOnFail bool
 var experimental bool
 
@@ -55,6 +56,15 @@ func SetForce(f bool) {
 
 func GetForce() bool {
 	return getState("FORCE", force)
+}
+
+func SetDryRun(d bool) {
+	dryrunVar = d
+	os.Setenv("DRYRUN", "1")
+}
+
+func GetDryRun() bool {
+	return getState("DRYRUN", dryrunVar)
 }
 
 func SetPanic(p bool) {

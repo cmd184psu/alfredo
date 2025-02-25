@@ -231,3 +231,48 @@ func TestMain(m *testing.M) {
 	// Run the tests
 	os.Exit(m.Run())
 }
+
+func funkySleepErr() error {
+	time.Sleep(1 * time.Second)
+	return fmt.Errorf("that's an error")
+}
+func funkySleepGood() error {
+	time.Sleep(1 * time.Second)
+	return nil
+}
+
+func TestGoFuncAndSpin(t *testing.T) {
+	type args struct {
+		cb     interface{}
+		params []interface{}
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "Test with funkySleep (err)",
+			args: args{
+				cb:     funkySleepErr,
+				params: []interface{}{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Test with funkySleep (good)",
+			args: args{
+				cb:     funkySleepGood,
+				params: []interface{}{},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := GoFuncAndSpin(tt.args.cb, tt.args.params...); (err != nil) != tt.wantErr {
+				t.Errorf("GoFuncAndSpin() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

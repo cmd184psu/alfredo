@@ -5,10 +5,7 @@ import (
 )
 
 func mockFunction(file string) bool {
-	if file == "success.txt" {
-		return true
-	}
-	return false
+	return file == "success.txt"
 }
 
 // TestConcurrent tests the Concurrent function with a mock callback

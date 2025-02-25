@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -208,6 +209,10 @@ func (ex ExecStruct) captureOutput(cmd *exec.Cmd) (string, string, error) {
 */
 
 func (ex *ExecStruct) Execute() error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", ex.mainCli)
+		return nil
+	}
 	VerbosePrintln("Execute:: begin")
 	var err error
 	var wg sync.WaitGroup
@@ -285,6 +290,10 @@ func (ex *ExecStruct) Execute() error {
 }
 
 func (ex *ExecStruct) ExecuteSTILLBROKEN() error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", ex.mainCli)
+		return nil
+	}
 	VerbosePrintln("Execute:: begin")
 	var err error
 	var wg sync.WaitGroup
@@ -359,6 +368,11 @@ func (ex *ExecStruct) ExecuteSTILLBROKEN() error {
 	return err
 }
 func (ex *ExecStruct) ExecutePRE17Jan2025() error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", ex.mainCli)
+		return nil
+	}
+
 	VerbosePrintln("Execute:: begin")
 	var err error
 	var wg sync.WaitGroup
@@ -443,6 +457,10 @@ func (ex *ExecStruct) ExecutePRE17Jan2025() error {
 	return err
 }
 func (ex *ExecStruct) ExecuteOLD() error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", ex.mainCli)
+		return nil
+	}
 	VerbosePrintln("Execute:: begin")
 	var err error
 	var wg sync.WaitGroup
@@ -509,6 +527,10 @@ func (ex *ExecStruct) ExecuteOLD() error {
 }
 
 func LocalExecuteAndSpin(cli string) error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cli)
+		return nil
+	}
 	var err error
 	var wg sync.WaitGroup
 
@@ -532,6 +554,10 @@ func LocalExecuteAndSpin(cli string) error {
 }
 
 func RunToLess(cmd1 *exec.Cmd) error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cmd1)
+		return nil
+	}
 	//cmd1 := exec.Command("myprogram", "-help")
 
 	// Create the command for `less`
@@ -566,4 +592,49 @@ func RunToLess(cmd1 *exec.Cmd) error {
 		return fmt.Errorf("Error waiting for cmd2: %v", err)
 	}
 	return nil
+}
+
+func GoFuncAndSpin(cb interface{}, params ...interface{}) error {
+	if cb == nil {
+		return fmt.Errorf("callback function is nil")
+	}
+
+	cbValue := reflect.ValueOf(cb)
+	if cbValue.Kind() != reflect.Func {
+		return fmt.Errorf("callback is not a function")
+	}
+
+	var err error
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	sigChan := make(chan bool)
+	errorChan := make(chan error)
+	go func() {
+		defer wg.Done()
+		defer close(errorChan)
+		defer close(sigChan)
+
+		// Use reflection to call the callback function with the provided parameters
+		cbValue := reflect.ValueOf(cb)
+		cbParams := make([]reflect.Value, len(params))
+		for i, param := range params {
+			cbParams[i] = reflect.ValueOf(param)
+		}
+		results := cbValue.Call(cbParams)
+
+		// Assume the callback function returns a single error
+		if len(results) > 0 && results[0].CanInterface() {
+			if e, ok := results[0].Interface().(error); ok {
+				err = e
+			}
+		}
+
+		sigChan <- true
+		errorChan <- err
+	}()
+	go Spinny(sigChan)
+	err = <-errorChan
+	wg.Wait()
+	return err
 }

@@ -10,9 +10,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -283,7 +281,7 @@ func TestS3ClientSession_ParseFromURL(t *testing.T) {
 			if err := s3c.ParseFromURL(tt.args.url); (err != nil) != tt.wantErr {
 				t.Errorf("S3ClientSession.ParseFromURL() error = %v, wantErr %v", err, tt.wantErr)
 			} else {
-				fmt.Printf("bucket=%q key=%q\n", s3c.Bucket, s3c.ObjectKey)
+				fmt.Printf("bucket=%q key=%q\n", s3c.Bucket, tt.fields.ObjectKey)
 			}
 
 		})
@@ -331,57 +329,58 @@ func TestS3ClientSession_RecursiveBucketDeleteAlt(t *testing.T) {
 	// }
 }
 
-type mockS3Client struct {
-	s3iface.S3API
-	mock.Mock
-}
+// type mockS3Client struct {
+// 	s3iface.S3API
+// 	mock.Mock
+// }
 
-func (m *mockS3Client) HeadObjectWithContext(ctx aws.Context, input *s3.HeadObjectInput, opts ...request.Option) (*s3.HeadObjectOutput, error) {
-	args := m.Called(ctx, input)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*s3.HeadObjectOutput), args.Error(1)
-}
+// func (m *MockS3Client) HeadObjectWithContext(ctx aws.Context, input *s3.HeadObjectInput, opts ...request.Option) (*s3.HeadObjectOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	if args.Get(0) == nil {
+// 		return nil, args.Error(1)
+// 	}
+// 	return args.Get(0).(*s3.HeadObjectOutput), args.Error(1)
+// }
 
-func (m *mockS3Client) GetObjectWithContext(ctx aws.Context, input *s3.GetObjectInput, opts ...request.Option) (*s3.GetObjectOutput, error) {
-	args := m.Called(ctx, input)
-	return args.Get(0).(*s3.GetObjectOutput), args.Error(1)
-}
+// func (m *mockS3Client) GetObjectWithContext(ctx aws.Context, input *s3.GetObjectInput, opts ...request.Option) (*s3.GetObjectOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(*s3.GetObjectOutput), args.Error(1)
+// }
 
-func (m *mockS3Client) PutObjectWithContext(ctx aws.Context, input *s3.PutObjectInput, opts ...request.Option) (*s3.PutObjectOutput, error) {
-	args := m.Called(ctx, input)
-	return args.Get(0).(*s3.PutObjectOutput), args.Error(1)
-}
+// func (m *mockS3Client) PutObjectWithContext(ctx aws.Context, input *s3.PutObjectInput, opts ...request.Option) (*s3.PutObjectOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(*s3.PutObjectOutput), args.Error(1)
+// }
 
-func (m *mockS3Client) CreateMultipartUploadWithContext(ctx aws.Context, input *s3.CreateMultipartUploadInput, opts ...request.Option) (*s3.CreateMultipartUploadOutput, error) {
-	args := m.Called(ctx, input)
-	return args.Get(0).(*s3.CreateMultipartUploadOutput), args.Error(1)
-}
+// func (m *mockS3Client) CreateMultipartUploadWithContext(ctx aws.Context, input *s3.CreateMultipartUploadInput, opts ...request.Option) (*s3.CreateMultipartUploadOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(*s3.CreateMultipartUploadOutput), args.Error(1)
+// }
 
-func (m *mockS3Client) UploadPartWithContext(ctx aws.Context, input *s3.UploadPartInput, opts ...request.Option) (*s3.UploadPartOutput, error) {
-	args := m.Called(ctx, input)
-	return args.Get(0).(*s3.UploadPartOutput), args.Error(1)
-}
+// func (m *mockS3Client) UploadPartWithContext(ctx aws.Context, input *s3.UploadPartInput, opts ...request.Option) (*s3.UploadPartOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(*s3.UploadPartOutput), args.Error(1)
+// }
 
-func (m *mockS3Client) CompleteMultipartUploadWithContext(ctx aws.Context, input *s3.CompleteMultipartUploadInput, opts ...request.Option) (*s3.CompleteMultipartUploadOutput, error) {
-	args := m.Called(ctx, input)
-	return args.Get(0).(*s3.CompleteMultipartUploadOutput), args.Error(1)
-}
+// func (m *mockS3Client) CompleteMultipartUploadWithContext(ctx aws.Context, input *s3.CompleteMultipartUploadInput, opts ...request.Option) (*s3.CompleteMultipartUploadOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(*s3.CompleteMultipartUploadOutput), args.Error(1)
+// }
 
-func (m *mockS3Client) AbortMultipartUploadWithContext(ctx aws.Context, input *s3.AbortMultipartUploadInput, opts ...request.Option) (*s3.AbortMultipartUploadOutput, error) {
-	args := m.Called(ctx, input)
-	return args.Get(0).(*s3.AbortMultipartUploadOutput), args.Error(1)
-}
+// func (m *mockS3Client) AbortMultipartUploadWithContext(ctx aws.Context, input *s3.AbortMultipartUploadInput, opts ...request.Option) (*s3.AbortMultipartUploadOutput, error) {
+// 	args := m.Called(ctx, input)
+// 	return args.Get(0).(*s3.AbortMultipartUploadOutput), args.Error(1)
+// }
 
 //	func (m *mockS3Client) ListObjectsV2PagesWithContext(ctx context.Context, input *s3.ListObjectsV2Input, fn func(*s3.ListObjectsV2Output, bool) bool) error {
 //		args := m.Called(ctx, input, fn)
 //		return args.Error(0)
 //	}
-func (m *mockS3Client) CopyObject(input *s3.CopyObjectInput) (*s3.CopyObjectOutput, error) {
-	args := m.Called(input)
-	return args.Get(0).(*s3.CopyObjectOutput), args.Error(1)
-}
+//
+//	func (m *mockS3Client) CopyObject(input *s3.CopyObjectInput) (*s3.CopyObjectOutput, error) {
+//		args := m.Called(input)
+//		return args.Get(0).(*s3.CopyObjectOutput), args.Error(1)
+//	}
 func TestCopyObjectBetweenBuckets(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -426,8 +425,8 @@ func TestCopyObjectBetweenBuckets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Initialize mocks
-			sourceMock := new(mockS3Client)
-			targetMock := new(mockS3Client)
+			sourceMock := new(MockS3Client)
+			targetMock := new(MockS3Client)
 			sourceS3 := S3ClientSession{
 				Client: sourceMock, // Type cast using unsafe.Pointer
 				Bucket: "source-bucket",
@@ -499,11 +498,6 @@ func TestCopyObjectBetweenBuckets(t *testing.T) {
 	}
 }
 
-// MockS3Client is a mock of the S3 client
-type MockS3Client struct {
-	mock.Mock
-}
-
 // func (m *mockS3Client) ListObjectsV2PagesWithContext(ctx context.Context, input *s3.ListObjectsV2Input, fn func(*s3.ListObjectsV2Output, bool) bool) error {
 // 	args := m.Called(ctx, input, fn)
 // 	return args.Error(0)
@@ -511,8 +505,8 @@ type MockS3Client struct {
 
 func TestCopyAllObjects(t *testing.T) {
 	// Create mock S3 clients
-	mockSourceS3Client := new(mockS3Client)
-	mockTargetS3Client := new(mockS3Client)
+	mockSourceS3Client := new(MockS3Client)
+	mockTargetS3Client := new(MockS3Client)
 
 	// Create S3ClientSessions
 	sourceS3 := S3ClientSession{
@@ -542,7 +536,7 @@ func TestCopyAllObjects(t *testing.T) {
 	mockTargetS3Client.On("CopyObject", mock.Anything).Return(&s3.CopyObjectOutput{}, nil)
 
 	// Call the function
-	err := sourceS3.CopyAllObjects(targetS3, progress)
+	err := sourceS3.CopyAllObjectsBatch(targetS3, progress, 0)
 
 	// Assertions
 	assert.NoError(t, err)
@@ -559,8 +553,8 @@ func TestCopyAllObjects(t *testing.T) {
 
 func TestCopyAllObjectsWithFailure(t *testing.T) {
 	// Similar setup as above, but mock a failure scenario
-	mockSourceS3Client := new(mockS3Client)
-	mockTargetS3Client := new(mockS3Client)
+	mockSourceS3Client := new(MockS3Client)
+	mockTargetS3Client := new(MockS3Client)
 
 	sourceS3 := S3ClientSession{
 		Client: mockSourceS3Client,
@@ -591,7 +585,7 @@ func TestCopyAllObjectsWithFailure(t *testing.T) {
 		return *input.Key == "object2"
 	})).Return(&s3.CopyObjectOutput{}, errors.New("copy failed"))
 
-	err := sourceS3.CopyAllObjects(targetS3, progress)
+	err := sourceS3.CopyAllObjectsBatch(targetS3, progress, 0)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(2), atomic.LoadInt64(&progress.TotalObjects))
@@ -650,7 +644,7 @@ func TestCalculateTotalParts(t *testing.T) {
 		name     string
 		objSize  int64
 		partSize int64
-		expected int
+		expected int64
 	}{
 		{"Exact division", 100, 25, 4},
 		{"Non-exact division", 100, 30, 4},

@@ -2,6 +2,7 @@ package alfredo
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,6 +15,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 		requestPayload string
 		sshHost        string
 		sshKey         string
+		directory      string
 		timeout        time.Duration
 		showSpinny     bool
 		captureStdout  bool
@@ -74,10 +76,30 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			wantErr:        false,
 		},
 		{
-			name:           "remote md5sum",
+			name:          "current directory",
+			command:       "pwd",
+			directory:     "/usr/local/bin",
+			captureStdout: true,
+			wantOutput:    "/usr/local/bin",
+			wantExitCode:  0,
+			wantErr:       false,
+		},
+		{
+			name:           "local md5sum 2",
+			command:        "./md5sum",
+			directory:      "/usr/local/bin",
+			requestPayload: "5555",
+			captureStdout:  true,
+			wantOutput:     "6074c6aa3488f3c2dddff2a7ca821aab  -",
+			wantExitCode:   0,
+			wantErr:        false,
+		},
+		{
+			name:           "remote md5sum 2",
 			sshHost:        "localhost",
-			sshKey:         ExpandTilde("~/.ssh/id_rsa"),
-			command:        "/usr/local/bin/md5sum",
+			sshKey:         ExpandTilde("~/.ssh/homelab_rsa"),
+			command:        "./md5sum",
+			directory:      "/usr/local/bin",
 			captureStdout:  true,
 			requestPayload: "5555",
 			wantOutput:     "6074c6aa3488f3c2dddff2a7ca821aab  -",
@@ -92,6 +114,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 				WithCommand(tt.command, tt.args...).
 				WithRequestPayload(tt.requestPayload).
 				WithSSH(tt.sshHost, tt.sshKey).
+				WithDirectory(tt.directory).
 				WithTimeout(tt.timeout).
 				WithSpinny(tt.showSpinny).
 				WithCaptureStdout(tt.captureStdout).
@@ -112,6 +135,78 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			}
 			if gotExitCode != tt.wantExitCode {
 				t.Errorf("CLIExecutor.Execute() gotExitCode = %v, want %v", gotExitCode, tt.wantExitCode)
+			}
+		})
+	}
+}
+
+func TestDiskDuplicatorArgs(t *testing.T) {
+	type args struct {
+		device     string
+		outputFile string
+		blockSize  int64
+		count      int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "Small block size",
+			args: args{
+				device:     "sda",
+				outputFile: "output.img",
+				blockSize:  512,
+				count:      1024,
+			},
+			want: "if=/dev/sda of=output.img bs=512 seek=1 count=1",
+		},
+		{
+			name: "Medium block size",
+			args: args{
+				device:     "sda",
+				outputFile: "output.img",
+				blockSize:  1024 * 1024,
+				count:      1024 * 1024 * 10,
+			},
+			want: "if=/dev/sda of=output.img bs=1M seek=9 count=1",
+		},
+		{
+			name: "Large block size",
+			args: args{
+				device:     "sda",
+				outputFile: "output.img",
+				blockSize:  1024 * 1024,
+				count:      1024 * 1024 * 1024 * 5,
+			},
+			want: "if=/dev/sda of=output.img bs=1M seek=5119 count=1",
+		},
+		{
+			name: "Exact block size",
+			args: args{
+				device:     "sda",
+				outputFile: "output.img",
+				blockSize:  1024,
+				count:      1024,
+			},
+			want: "if=/dev/sda of=output.img bs=1K seek=0 count=1",
+		},
+		{
+			name: "Non-divisible block size",
+			args: args{
+				device:     "sda",
+				outputFile: "output.img",
+				blockSize:  1500,
+				count:      3000,
+			},
+			want: "if=/dev/sda of=output.img bs=1K seek=1 count=1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DiskDuplicatorArgs(tt.args.device, tt.args.outputFile, tt.args.blockSize, tt.args.count); strings.Join(got, " ") != tt.want {
+				t.Errorf("DiskDuplicatorArgs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

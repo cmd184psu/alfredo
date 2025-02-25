@@ -124,7 +124,7 @@ func TestSSHlistOpt(t *testing.T) {
 	cli := "ls -lah"
 
 	if err = ssh.RemoteExecuteAndSpin(cli); err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("remote execute and spin failed with %s", err.Error())
 	}
 	fmt.Println(ssh.GetBody())
 	fmt.Println("---END TEST SSH LIST of /opt----")

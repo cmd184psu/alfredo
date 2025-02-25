@@ -50,18 +50,50 @@ type S3ClientSession struct {
 	Region      string       `json:"region"`
 	ObjectKey   string       `json:"key"`
 	//	Client      *s3.S3
-	Client         s3iface.S3API
-	Versioning     bool `json:"versioning"`
-	established    bool
-	keepBucket     bool
-	PolicyId       string `json:"policyid"`
-	session        *session.Session
-	ctx            context.Context
-	forceSSL       bool
-	logging        bool
-	maxConcurrency int
-	skipSize       int64
-	Response       *http.Response
+	Client            s3iface.S3API
+	Versioning        bool `json:"versioning"`
+	established       bool
+	keepBucket        bool
+	PolicyId          string `json:"policyid"`
+	session           *session.Session
+	ctx               context.Context
+	forceSSL          bool
+	logging           bool
+	maxConcurrency    int
+	skipSize          int64
+	Response          *http.Response
+	ContinuationToken *string
+	BatchSize         int `json:"batchSize"`
+}
+
+// deep copy with a clean new session
+func (s3c *S3ClientSession) DeepCopy() S3ClientSession {
+	var retValue S3ClientSession
+	retValue.Credentials = s3c.Credentials
+	retValue.Bucket = s3c.Bucket
+	retValue.Endpoint = s3c.Endpoint
+	retValue.Region = s3c.Region
+	retValue.ObjectKey = s3c.ObjectKey
+	retValue.Client = s3c.Client
+	retValue.Versioning = s3c.Versioning
+	retValue.established = false
+	retValue.keepBucket = s3c.keepBucket
+	retValue.PolicyId = s3c.PolicyId
+	retValue.session = nil
+	retValue.ctx = context.Background()
+	retValue.forceSSL = s3c.forceSSL
+	retValue.logging = s3c.logging
+	retValue.maxConcurrency = s3c.maxConcurrency
+	retValue.skipSize = s3c.skipSize
+	retValue.Response = nil
+	retValue.ContinuationToken = nil
+	retValue.BatchSize = s3c.BatchSize
+
+	if err := retValue.EstablishSession(); err != nil {
+		panic(err.Error())
+	}
+
+	return retValue
 }
 
 const S3_default_credentials_file = "~/.aws/credentials"
@@ -569,6 +601,10 @@ func (s3c S3credStruct) CredentialsStanza() string {
 		s3c.SecretKey)
 }
 
+func (s3c S3credStruct) CredentialsS3FSPassword() string {
+	return fmt.Sprintf("%s:%s\n", s3c.AccessKey, s3c.SecretKey)
+}
+
 func (s3c S3credStruct) GenerateAWSCLItoString(endpoint string, region string, useSSL bool) string {
 	if strings.HasPrefix(endpoint, "http") {
 		endpoint = endpoint[strings.Index(endpoint, ":")+3:]
@@ -998,6 +1034,13 @@ type ProgressTracker struct {
 	mu              sync.Mutex
 }
 
+func (p *ProgressTracker) Lock() {
+	p.mu.Lock()
+}
+func (p *ProgressTracker) Unlock() {
+	p.mu.Unlock()
+}
+
 type CopyResult struct {
 	SourceKey   string
 	TargetKey   string
@@ -1032,7 +1075,7 @@ func withRetry(operation func() error) error {
 }
 
 // CopyAllObjects copies all objects between S3-compatible systems
-func (sourceS3 S3ClientSession) CopyAllObjects(
+func (sourceS3 S3ClientSession) CopyAllObjectsDoNotUse(
 	targetS3 *S3ClientSession,
 	progress *ProgressTracker,
 ) error {
@@ -1118,6 +1161,55 @@ func (sourceS3 S3ClientSession) CopyAllObjects(
 	return nil
 }
 
+func (sourceS3 *S3ClientSession) CopyAllObjectsBatch(
+	targetS3 *S3ClientSession,
+	progress *ProgressTracker, batchSize int) error {
+
+	migrationMgr := NewMigrationManager(sourceS3, targetS3, progress, batchSize)
+
+	var wg sync.WaitGroup
+	resultsChan := make(chan CopyResult, 10000)
+	i := 0
+	done := make(chan bool)
+	go func() {
+		for result := range resultsChan {
+			if !result.Success {
+				progress.mu.Lock()
+				progress.FailedObjects[result.SourceKey] = result.Error
+				progress.mu.Unlock()
+			}
+		}
+		done <- true
+	}()
+
+	for {
+		//VerbosePrintf("loop with continuationToken: %v and %d", sourceS3.ContinuationToken, i)
+		i++
+
+		if err := migrationMgr.MigrationLoop(&wg, &resultsChan); err != nil {
+			return err
+		}
+
+		if migrationMgr.IsDone() {
+			break
+		}
+	}
+
+	// Wait for all copy operations to complete
+	wg.Wait()
+
+	// Close results channel and wait for collector to finish
+	close(resultsChan)
+	<-done
+
+	if len(progress.FailedObjects) > 0 {
+		log.Printf("Failed objects: %s", PrettyPrint(progress.FailedObjects))
+		return fmt.Errorf("some objects failed to copy. Check FailedObjects map for details")
+	}
+
+	return nil
+}
+
 func CalculatePartSize(objectSize int64) int64 {
 	if objectSize <= defaultPartSizeMin {
 		return 0
@@ -1137,11 +1229,15 @@ func CalculatePartSize(objectSize int64) int64 {
 	return partSize
 }
 
-func CalculateTotalParts(objectSize, partSize int64) int {
+func CalculateTotalParts(objectSize, partSize int64) int64 {
 	if objectSize < 5*1024*1024 {
 		return 0
 	}
-	return int(math.Ceil(float64(objectSize) / float64(partSize)))
+
+	if objectSize < 5*1024*1024*1024 {
+		return int64(math.Ceil(float64(objectSize) / float64(defaultPartSizeMin)))
+	}
+	return int64(math.Ceil(float64(objectSize) / float64(partSize)))
 }
 
 func tgtComesAfterSrc(tgt, src s3.HeadObjectOutput) bool {

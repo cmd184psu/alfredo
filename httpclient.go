@@ -429,6 +429,12 @@ func (has *HttpApiStruct) httpApiCallLocal(method string, uri string) error {
 	if has.Timeout == 0 {
 		has.Timeout = httpapi_default_timeout
 	}
+
+	if GetDryRun() {
+		fmt.Printf("DRY RUN: curl -X %s %s\n", method, apiURL)
+		return nil
+	}
+
 	client := &http.Client{Transport: tr, Timeout: time.Duration(has.Timeout) * time.Second}
 	// Create a new  request
 	VerbosePrintln(method + " " + apiURL)
@@ -496,6 +502,12 @@ func (has *HttpApiStruct) httpApiCallRemote(method string, uri string) error {
 	VerbosePrintf("BEGIN httpApiCallRemote(%s,%s)", method, uri)
 	cli := has.BuildCurlCLI(method, uri)
 	VerbosePrintf("cli=%q", cli)
+
+	if GetDryRun() {
+		fmt.Printf("DRY RUN: curl -X %s %s over ssh to %s\n", method, uri, has.ssh.Host)
+		return nil
+	}
+
 	if has.IsPayloadEmpty() {
 		//fmt.Printf("payload is empty??? payload size is %d", len(as.payload))
 		if err := has.ssh.SecureRemoteExecution(cli); err != nil {

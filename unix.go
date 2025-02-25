@@ -40,7 +40,9 @@ func Touch(fileName string) error {
 	_, err := os.Stat(fileName)
 	if os.IsNotExist(err) {
 		file, err := os.Create(fileName)
-		defer file.Close()
+		if err == nil {
+			defer file.Close()
+		}
 		return err
 	} else {
 		currentTime := time.Now().Local()
@@ -49,6 +51,10 @@ func Touch(fileName string) error {
 }
 
 func System3toCapturedString(s *string, cmd string) error {
+	if GetDryRun() {
+		fmt.Printf("DRYRUN: %s\n", cmd)
+		return nil
+	}
 	VerbosePrintln(cmd)
 	for strings.Contains(cmd, "  ") {
 		cmd = strings.ReplaceAll(strings.TrimSpace(cmd), "  ", " ")
@@ -189,6 +195,10 @@ func AppendStringToFile(filename string, content string) error {
 
 // formerly Execute
 func Popen3(output_buffer *bytes.Buffer, stack ...*exec.Cmd) (err error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", stack)
+		return nil
+	}
 	var error_buffer bytes.Buffer
 	pipe_stack := make([]*io.PipeWriter, len(stack)-1)
 	i := 0
@@ -241,6 +251,10 @@ func FileExists(filename string) (bool, error) {
 }
 
 func PopentoString(cmd string) (string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cmd)
+		return "", nil
+	}
 	arglist := strings.Split(cmd, " ")
 	//app:=arglist[0]
 
@@ -255,6 +269,10 @@ func PopentoString(cmd string) (string, error) {
 }
 
 func PopentoStringAwk(cmd string, awk int) (string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cmd)
+		return "", nil
+	}
 	arglist := strings.Split(cmd, " ")
 	//app:=arglist[0]
 
@@ -271,6 +289,13 @@ func PopentoStringAwk(cmd string, awk int) (string, error) {
 }
 
 func Popen3GrepFast(cmd string, musthave string, mustnothave string) ([]string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cmd)
+		fmt.Println("\tmusthave = ", musthave)
+		fmt.Println("\tmustnothave = ", mustnothave)
+		return []string{}, nil
+	}
+
 	var b bytes.Buffer
 	arglist := strings.Split(cmd, " ")
 
@@ -327,6 +352,12 @@ func Popen3GrepFast(cmd string, musthave string, mustnothave string) ([]string, 
 }
 
 func Popen3Grep2(cmd string, musthave string, mustnothave string) ([]string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cmd)
+		fmt.Println("\tmusthave = ", musthave)
+		fmt.Println("\tmustnothave = ", mustnothave)
+		return []string{}, nil
+	}
 	var b bytes.Buffer
 	arglist := strings.Split(cmd, " ")
 
@@ -378,6 +409,12 @@ func Popen3Grep2(cmd string, musthave string, mustnothave string) ([]string, err
 	return newslice, nil
 }
 func Popen3Grep(cmd string, musthave string, mustnothave string) ([]string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", cmd)
+		fmt.Println("\tmusthave = ", musthave)
+		fmt.Println("\tmustnothave = ", mustnothave)
+		return []string{}, nil
+	}
 	var b bytes.Buffer
 	arglist := strings.Split(cmd, " ")
 
@@ -434,6 +471,11 @@ func Popen3Grep(cmd string, musthave string, mustnothave string) ([]string, erro
 }
 
 func SSHPopenToString(hostname string, command string) (string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", command)
+		fmt.Println("\thostname = ", hostname)
+		return "", nil
+	}
 	client, session, err := getsshclient(hostname)
 	if err != nil {
 		//panic(err)
@@ -452,10 +494,10 @@ func SSHPopenToString(hostname string, command string) (string, error) {
 // write otuput content (including new lines) to file outputfile (including full absolute path) on remoteserver over SSH
 func StringToFileOverSSH(outputContent string, remoteserver string, outputfile string) error {
 	client, session, err := getsshclient(remoteserver)
-	defer client.Close()
 	if err != nil {
 		return err
 	}
+	defer client.Close()
 	var stdin io.WriteCloser
 	stdin, err = session.StdinPipe()
 	if err != nil {
@@ -508,6 +550,10 @@ func getsshclient(host string) (*ssh.Client, *ssh.Session, error) {
 }
 
 func DmidecodeProduct() (string, error) {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: ", "dmidecode")
+		return "", nil
+	}
 	var b bytes.Buffer
 	if err := Popen3(&b,
 		exec.Command("dmidecode"),
@@ -576,6 +622,10 @@ func GetFirstFile(rootpath string, hint string) string {
 }
 
 func ExecToFile(cli string, ofile string) (err error) {
+	if GetDryRun() {
+		fmt.Printf("DRYRUN: %s > %s\n", cli, ofile)
+		return nil
+	}
 	err = nil
 	arglist := strings.Split(cli, " ")
 	var outfile *os.File
@@ -624,6 +674,10 @@ func Spinny(sigChan chan bool) {
 }
 
 func System3AndSpin(cmd string, redirect string) (err error) {
+	if GetDryRun() {
+		fmt.Printf("DRYRUN: %s > %s\n", cmd, redirect)
+		return nil
+	}
 	//var errorRec error
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -673,6 +727,10 @@ func FileExistsEasy(p string) bool {
 }
 
 func RecursiveDelete(path string) error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: rm -rf " + path)
+		return nil
+	}
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
@@ -701,6 +759,10 @@ func RecursiveDelete(path string) error {
 }
 
 func RemoveGlob(glob string) error {
+	if GetDryRun() {
+		fmt.Println("DRYRUN: rm " + glob)
+		return nil
+	}
 	if len(glob) == 0 || len(glob) == 1 {
 		return errors.New("glob was empty or too short")
 	}
