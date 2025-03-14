@@ -153,13 +153,42 @@ func (jhs JwtHttpsServerStruct) RouteExists(r string) bool {
 	return jhs.pathMap[r]
 }
 
-// func (jhs *JwtHttpsServerStruct) SetLoginHandler(h http.Handler) {
-// 	r = chi.NewRouter()
-// 	r.Post("/login", h)
-// 	return r
-// 	// if !jhs.pathMap[LoginRoute] {
-// 	// 	jhs.Router.Post(LoginRoute, h)
-// 	// }
+//	func (jhs *JwtHttpsServerStruct) SetLoginHandler(h http.Handler) {
+//		r = chi.NewRouter()
+//		r.Post("/login", h)
+//		return r
+//		// if !jhs.pathMap[LoginRoute] {
+//		// 	jhs.Router.Post(LoginRoute, h)
+//		// }
+//	}
+func (jhs *JwtHttpsServerStruct) SetupStaticRoutes(index string) {
+	fs := http.FileServer(http.Dir("./static/js"))
+	jhs.Router.Handle("/js/*", http.StripPrefix("/js/", fs))
+	jhs.Router.Handle("/css/*", http.StripPrefix("/css/", http.FileServer(http.Dir("./static/css"))))
+	jhs.Router.Handle("/images/*", http.StripPrefix("/images/", http.FileServer(http.Dir("./static/images"))))
+	jhs.Router.Handle("/webfonts/*", http.StripPrefix("/webfonts/", http.FileServer(http.Dir("./static/webfonts"))))
+	log.Printf("serving index file: %s\n", index)
+	jhs.Router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("in / route")
+		log.Printf("URI=%s", r.RequestURI)
+		log.Printf("serving index file: %s\n", index)
+		http.ServeFile(w, r, "./static/"+index)
+	})
+}
+
+// func (jhs *JwtHttpsServerStruct) SetupStaticRoutes(index string) {
+// 	fs := http.FileServer(http.Dir("./static/js"))
+// 	r.PathPrefix("/js/").Handler(http.StripPrefix("/js/", fs))
+// 	r.PathPrefix("/css/").Handler(http.StripPrefix("/css/", http.FileServer(http.Dir("./static/css"))))
+// 	r.PathPrefix("/webfonts/").Handler(http.StripPrefix("/webfonts/", http.FileServer(http.Dir("./static/webfonts"))))
+// 	log.Printf("serving index file: %s\n", index)
+// 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+// 		log.Printf("in / route")
+// 		log.Printf("URI=%s", r.RequestURI)
+// 		log.Printf("serving index file: %s\n", index)
+// 		http.ServeFile(w, r, "./static/"+index)
+// 	})
+
 // }
 
 func (jhs *JwtHttpsServerStruct) StartServer() error {
@@ -179,6 +208,9 @@ func (jhs *JwtHttpsServerStruct) StartServer() error {
 	}
 	// Serve static files
 	if !jhs.pathMap[StaticRoute] {
+		jhs.Router.Handle(StaticRoute, http.FileServer(http.Dir(jhs.GetStaticDirRoute())))
+	}
+	if !jhs.pathMap["/"] {
 		jhs.Router.Handle(StaticRoute, http.FileServer(http.Dir(jhs.GetStaticDirRoute())))
 	}
 

@@ -130,7 +130,7 @@ func PrettyPrintJSONFile(filePath string) {
 	fmt.Println(string(prettyJSON))
 }
 
-func TranslateSimilarStructure(input interface{}, output interface{}) error {
+func TranslateSimilarStructure(input interface{}, output *interface{}) error {
 	// Marshal the input structure into a []byte
 	data, err := json.Marshal(input)
 	if err != nil {
@@ -144,4 +144,23 @@ func TranslateSimilarStructure(input interface{}, output interface{}) error {
 	}
 
 	return nil
+}
+
+func JsonDeepCopy(input interface{}) (interface{}, error) {
+	// Marshal the input structure into a []byte
+	data, err := json.Marshal(input)
+	if err != nil {
+		fmt.Printf("error marshaling: %v\n", err)
+		return nil, err
+	}
+
+	// Unmarshal the []byte into the output structure
+	var output interface{}
+	err = json.Unmarshal(data, &output)
+	if err != nil {
+		fmt.Printf("error unmarshaling: %v\n", err)
+		return nil, err
+	}
+
+	return output, nil
 }

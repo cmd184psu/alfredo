@@ -667,3 +667,36 @@ func SliceToDoc(s []string) string {
 	}
 	return strings.Join(s[:len(s)-1], ", ") + " and " + s[len(s)-1]
 }
+
+func DiffStringBlobs(a, b string) string {
+	aLines := strings.Split(a, "\n")
+	bLines := strings.Split(b, "\n")
+
+	return DiffStringContainers(aLines, bLines)
+}
+
+func TrimTrailingEmptyLines(lines []string) []string {
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return lines[:end]
+}
+func DiffStringContainers(aLines, bLines []string) string {
+	var result strings.Builder
+	aLines = TrimTrailingEmptyLines(aLines)
+	bLines = TrimTrailingEmptyLines(bLines)
+
+	for i := 0; i < len(aLines) || i < len(bLines); i++ {
+		if i < len(aLines) && i < len(bLines) {
+			if !strings.EqualFold(strings.TrimSpace(aLines[i]), strings.TrimSpace(bLines[i])) {
+				result.WriteString(fmt.Sprintf("Line %d:\n- %s\n+ %s\n", i+1, aLines[i], bLines[i]))
+			}
+		} else if i < len(aLines) {
+			result.WriteString(fmt.Sprintf("<Line %d:\n- %q\n", i+1, aLines[i]))
+		} else {
+			result.WriteString(fmt.Sprintf(">Line %d:\n+ %q\n", i+1, bLines[i]))
+		}
+	}
+	return result.String()
+}

@@ -715,6 +715,9 @@ func S3HelperScriptBuiltInCredsCreateBucket(region string, endpoint string, ak s
 }
 
 func (s3c S3ClientSession) IsVersioningEnabled() bool {
+	if len(s3c.Bucket) == 0 {
+		panic("bucket is not set")
+	}
 	if err := s3c.EstablishSession(); err != nil {
 		panic(err.Error())
 	}
@@ -747,6 +750,9 @@ func (s3c S3ClientSession) IsVersioningEnabled() bool {
 	}
 
 	// Check if versioning is enabled
+
+	VerbosePrintf("Versioning status=%q", aws.StringValue(result.Status))
+
 	return strings.EqualFold(aws.StringValue(result.Status), "Enabled")
 }
 
