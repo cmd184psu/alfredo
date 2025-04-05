@@ -19,6 +19,7 @@ type CLIExecutor struct {
 	requestPayload string
 	sshHost        string
 	sshKey         string
+	sshUser        string
 	timeout        time.Duration
 	showSpinny     bool
 	captureStdout  bool
@@ -27,6 +28,7 @@ type CLIExecutor struct {
 	responseBody   string
 	trimWhiteSpace bool
 	directory      string
+	dump           bool
 }
 
 const default_timeout = 5 * time.Second
@@ -49,9 +51,17 @@ func (c *CLIExecutor) WithRequestPayload(payload string) *CLIExecutor {
 	return c
 }
 
-func (c *CLIExecutor) WithSSH(host, key string) *CLIExecutor {
+func (c *CLIExecutor) WithSSH(host, key, user string) *CLIExecutor {
 	c.sshHost = host
 	c.sshKey = key
+	c.sshUser = user
+	return c
+}
+
+func (c *CLIExecutor) WithSSHStruct(s SSHStruct) *CLIExecutor {
+	c.sshHost = s.Host
+	c.sshKey = s.Key
+	c.sshUser = s.User
 	return c
 }
 
@@ -70,6 +80,13 @@ func (c *CLIExecutor) WithTimeout(timeout time.Duration) *CLIExecutor {
 // stick around for 100 days
 func (c *CLIExecutor) AsLongRunning() *CLIExecutor {
 	return c.WithTimeout(8640000 * time.Second)
+}
+
+func (c *CLIExecutor) DumpOutput() *CLIExecutor {
+	c.captureStdout = true
+	c.captureStderr = true
+	c.dump = true
+	return c
 }
 
 func (c *CLIExecutor) WithSpinny(show bool) *CLIExecutor {
@@ -117,9 +134,16 @@ func (c *CLIExecutor) GetStatusCode() int {
 	return c.statusCode
 }
 
+func (c *CLIExecutor) GetRequestPayload() string {
+	return c.requestPayload
+}
+
 func (c *CLIExecutor) GetCli() string {
 	if c.sshHost != "" {
-		return fmt.Sprintf("ssh -i %s %s \"%s %s\"", c.sshKey, c.sshHost, c.command, strings.Join(c.args, " "))
+		if len(c.sshUser) == 0 {
+			c.sshUser = os.Getenv("USER")
+		}
+		return fmt.Sprintf("/usr/bin/ssh -i %s %s@%s \"%s %s\"", ExpandTilde(c.sshKey), c.sshUser, c.sshHost, c.command, strings.Join(c.args, " "))
 	}
 	return fmt.Sprintf("%s %s", c.command, strings.Join(c.args, " "))
 }
@@ -131,6 +155,24 @@ func (c *CLIExecutor) Execute() error {
 	}
 	var cmd *exec.Cmd
 
+	cwd := EatErrorReturnString(os.Getwd())
+
+	if len(cwd) == 0 {
+		return fmt.Errorf("current working directory is empty")
+	}
+
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			panic(fmt.Sprintf("chdir to %s failed: %s", cwd, err.Error()))
+		}
+	}()
+
+	//only chdir if local
+	if len(c.sshHost) == 0 && len(c.directory) > 0 {
+		if err := os.Chdir(c.directory); err != nil {
+			return fmt.Errorf("chdir to %q failed: %s", c.directory, err.Error())
+		}
+	}
 	if len(c.args) == 0 && len(c.command) == 0 {
 		return fmt.Errorf("no command provided")
 	}
@@ -144,15 +186,14 @@ func (c *CLIExecutor) Execute() error {
 		c.command = parts[0]
 		c.args = parts[1:]
 	}
-	cwd := EatErrorReturnString(os.Getwd())
 	VerbosePrintf("cwd: %s\n", cwd)
-	if len(c.directory) > 0 {
-		VerbosePrintf("want to chdir to %s\n", c.directory)
-	} else {
-		VerbosePrintf("don't change directories\n")
-	}
+	// if len(c.directory) > 0 {
+	// 	VerbosePrintf("want to chdir to %s\n", c.directory)
+	// } else {
+	// 	VerbosePrintf("don't change directories\n")
+	// }
 	if c.sshHost != "" {
-		cmd = exec.Command("ssh", "-i", c.sshKey, c.sshHost, c.command, strings.Join(c.args, " "))
+		cmd = exec.Command("/usr/bin/ssh", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command, strings.Join(c.args, " "))
 	} else {
 		VerbosePrintf("command: %s %s\n", c.command, strings.Join(c.args, " "))
 		cmd = exec.Command(c.command, c.args...)
@@ -226,6 +267,8 @@ func (c *CLIExecutor) Execute() error {
 				output += stderrBuf.String()
 			}
 			c.WithStatusCode(-1).WithResponseBody(output)
+			// fmt.Println("err:", err)
+			// fmt.Println("output:", output)
 			return err
 		}
 	}
@@ -244,6 +287,10 @@ func (c *CLIExecutor) Execute() error {
 	//fmt.Println("len of output is: ", len(c.GetResponseBody()))
 	//VerbosePrintf("wd is %s", EatErrorReturnString(os.Getwd()))
 	//VerbosePrintf("reverting back to  %s", cwd)
+
+	if c.dump {
+		fmt.Println(c.GetResponseBody())
+	}
 
 	//return os.Chdir(cwd)
 	return nil
@@ -276,5 +323,9 @@ func DiskDuplicatorArgs(device string, outputFile string, blockSize int64, count
 	if blockSize == 0 {
 		blockSize = 512
 	}
-	return strings.Split(fmt.Sprintf("if=/dev/%s of=%s bs=%s seek=%d count=1", device, outputFile, DDHumanReadableStorageSize(blockSize), count/blockSize-1), " ")
+	seek := count/blockSize - 1
+	if seek < 0 {
+		seek = 0
+	}
+	return strings.Split(fmt.Sprintf("if=/dev/%s of=%s bs=%s seek=%d count=1", device, outputFile, DDHumanReadableStorageSize(blockSize), seek), " ")
 }

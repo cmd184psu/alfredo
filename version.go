@@ -6,11 +6,12 @@ import (
 )
 
 // GitBranch will be injected with the current git branch name
+var GitRevision string
 var GitBranch string
 var GitVersion string
 var GitTimestamp string
 
-func BuildVersion(gitbranch string, gitversion string, gittimestamp string, mainbranch string) string {
+func buildVersion(gitbranch string, gitversion string, gittimestamp string, mainbranch string) string {
 	GitBranch = TrimQuotes(gitbranch)
 	GitVersion = TrimQuotes(gitversion)
 	GitTimestamp = TrimQuotes(gittimestamp)
@@ -19,7 +20,7 @@ func BuildVersion(gitbranch string, gitversion string, gittimestamp string, main
 	VerbosePrintln("time=" + GitTimestamp)
 
 	var gb string
-	fmt.Printf("Comparing %q vs %q\n", GitBranch, mainbranch)
+	//fmt.Printf("Comparing %q vs %q\n", GitBranch, mainbranch)
 	if strings.EqualFold(GitBranch, mainbranch) {
 		gb = ""
 	} else {
@@ -27,4 +28,12 @@ func BuildVersion(gitbranch string, gitversion string, gittimestamp string, main
 	}
 
 	return fmt.Sprintf("%s%s (%s)\n", GitVersion, gb, GitTimestamp)
+}
+
+func BuildVersion() string {
+	return buildVersion(GitBranch, GitVersion, GitTimestamp, "main")
+}
+
+func BuildVersionWithMainBranch(mainbranch string) string {
+	return buildVersion(GitBranch, GitVersion, GitTimestamp, mainbranch)
 }

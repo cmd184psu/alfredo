@@ -221,17 +221,18 @@ func (s3c S3ClientSession) WithBucket(b string) S3ClientSession {
 	return s3c
 }
 
-//lint:ignore ST1006 no reason
-func (this S3ClientSession) RemoveBucket() error {
-	if err := this.EstablishSession(); err != nil {
+func (s3c S3ClientSession) RemoveBucket() error {
+	if err := s3c.EstablishSession(); err != nil {
 		return err
 	}
-
-	output, err := this.Client.HeadBucket(&s3.HeadBucketInput{
-		Bucket: aws.String(this.Bucket),
+	if len(s3c.Bucket) == 0 {
+		return errors.New("bucket is not set")
+	}
+	_, err := s3c.Client.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(s3c.Bucket),
 	})
 
-	fmt.Println("output from head bucket: " + output.String())
+	//fmt.Println("output from head bucket: " + output.String())
 
 	if err != nil {
 		if strings.Contains(err.Error(), "Not Found") {
@@ -240,8 +241,8 @@ func (this S3ClientSession) RemoveBucket() error {
 			panic("failed to head bucket due to err: " + err.Error())
 		}
 	}
-	_, deleteErr := this.Client.DeleteBucket(&s3.DeleteBucketInput{
-		Bucket: aws.String(this.Bucket),
+	_, deleteErr := s3c.Client.DeleteBucket(&s3.DeleteBucketInput{
+		Bucket: aws.String(s3c.Bucket),
 	})
 	return deleteErr
 }
@@ -273,7 +274,7 @@ func GenerateSignature(sts, secret string) string {
 func (s3c *S3ClientSession) generateSignature(date string) string {
 
 	stringToSign := "PUT\n\n\n" + date + "\n/" + s3c.Bucket
-	fmt.Printf("sts=%q\n", stringToSign)
+	//fmt.Printf("sts=%q\n", stringToSign)
 
 	//	stringToSign := fmt.Sprintf("PUT\\n\\n\\n%s\\n%s", date, "/"+s3c.Bucket)
 	//	stringToSign2 := fmt.Sprintf("PUT\\n\\n\\n%s\\n%s", date, "/"+s3c.Bucket)
@@ -702,6 +703,64 @@ func S3HelperScriptBuiltInCreds(region string, endpoint string, ak string, sk st
 	scriptLine = append(scriptLine, "else")
 	scriptLine = append(scriptLine, "\taws $AWS_OPTS s3 $@")
 	scriptLine = append(scriptLine, "fi")
+	return strings.Join(scriptLine, "\n")
+}
+
+func S3HelperScriptDeepClean(profile string, region string, endpoint string) string {
+	return S3HelperScriptBuiltInCredsDeepCleanCommon(region, endpoint, "", "", profile)
+}
+
+func S3HelperScriptBuiltInCredsDeepClean(region string, endpoint string, ak string, sk string) string {
+	return S3HelperScriptBuiltInCredsDeepCleanCommon(region, endpoint, ak, sk, "")
+}
+
+func S3HelperScriptBuiltInCredsDeepCleanCommon(region string, endpoint string, ak string, sk string, profile string) string {
+	var scriptLine []string
+	scriptLine = append(scriptLine, "#!/usr/bin/env bash")
+	if !(len(ak) == 0 || len(sk) == 0) {
+		scriptLine = append(scriptLine, "export AWS_ACCESS_KEY_ID="+ak)
+		scriptLine = append(scriptLine, "export AWS_SECRET_ACCESS_KEY="+sk)
+	}
+	if len(profile) > 0 {
+		scriptLine = append(scriptLine, fmt.Sprintf("export AWS_OPTS=\" --endpoint-url=%s --region %s --no-verify-ssl\" --profile %s", endpoint, region, profile))
+	} else {
+		scriptLine = append(scriptLine, fmt.Sprintf("export AWS_OPTS=\" --endpoint-url=%s --region %s --no-verify-ssl\"", endpoint, region))
+	}
+	scriptLine = append(scriptLine, "export BUCKET_NAME=$1")
+	scriptLine = append(scriptLine, "MAX_KEYS=1000  # Max objects per request (AWS limit)")
+	scriptLine = append(scriptLine, "if [ -z \"$BUCKET_NAME\" ]; then")
+	scriptLine = append(scriptLine, "\techo \"Usage: $0 <bucket-name>\"")
+	scriptLine = append(scriptLine, "\texit 1")
+	scriptLine = append(scriptLine, "fi")
+	scriptLine = append(scriptLine, "echo \"Deleting all versions and delete markers from bucket: $BUCKET_NAME\"")
+	scriptLine = append(scriptLine, "while : ; do")
+	scriptLine = append(scriptLine, "\t# List all versions and delete markers in the bucket")
+	scriptLine= append(scriptLine, "\tOBJECTS_JSON=$(aws s3api list-object-versions ${AWS_OPTS} --bucket \"$BUCKET_NAME\" --max-items $MAX_KEYS --query '{Objects: (Versions || []), DeleteMarkers: (DeleteMarkers || [])}' --output json)")
+	scriptLine = append(scriptLine, "\t# Extract objects to delete")
+	scriptLine = append(scriptLine, "\tOBJECTS=$(echo \"$OBJECTS_JSON\" | jq -c '{Objects: ((.Objects + .DeleteMarkers) // [])}')")
+	scriptLine = append(scriptLine, "\t# Break if there are no more objects")
+	scriptLine = append(scriptLine, "if [[ \"$OBJECTS\" == '{\"Objects\":[]}' ]]; then")
+	scriptLine = append(scriptLine, "\t\techo \"All object versions and delete markers have been deleted.\"")
+	scriptLine = append(scriptLine, "\t\tbreak")
+	scriptLine = append(scriptLine, "\tfi")
+	scriptLine = append(scriptLine, "\t# Delete the batch of objects")
+	scriptLine = append(scriptLine, "\t	OBJECT_COUNT=$(echo \"$OBJECTS\" | jq '.Objects | length')")
+	scriptLine=append(scriptLine,"\tif [[ \"$OBJECT_COUNT\" -eq 0 ]]; then")
+	scriptLine = append(scriptLine, "\t\techo \"No objects found, exiting loop.\"")
+	scriptLine = append(scriptLine, "\t\tbreak")
+	scriptLine = append(scriptLine, "\tfi")
+
+	scriptLine = append(scriptLine, "echo \"Deleting $OBJECT_COUNT objects...\")")
+	scriptLine = append(scriptLine, "aws s3api ${AWS_OPTS} delete-objects --bucket \"$BUCKET_NAME\" --cli-input-json \"$OBJECTS\"")
+	scriptLine = append(scriptLine, "\t# small delay to avoid throttling")
+	scriptLine = append(scriptLine, "\tsleep 1")
+	scriptLine = append(scriptLine, "done")
+	scriptLine = append(scriptLine, "echo \"Bucket cleanup completed.\"")
+	scriptLine = append(scriptLine, "echo \"Deleting bucket: $BUCKET_NAME\"")
+	scriptLine = append(scriptLine, "aws s3api ${AWS_OPTS} delete-bucket --bucket \"$BUCKET_NAME\"")
+	scriptLine = append(scriptLine, "echo \"Bucket deleted.\"")
+	scriptLine = append(scriptLine, "echo \"Done.\"")
+	scriptLine = append(scriptLine, "exit 0")
 	return strings.Join(scriptLine, "\n")
 }
 

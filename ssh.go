@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -365,6 +366,11 @@ func getExitCode(s string) int {
 	e, _ := strconv.Atoi(splits[len(splits)-1])
 	return e
 }
+
+func (s *SSHStruct) RemoteTail(file string, lines int) ([]string, error) {
+	return s.RemotePopenGrep("tail -n "+strconv.Itoa(lines)+" "+file, "", "")
+}
+
 func (s *SSHStruct) SecureRemoteExecution(cli string) error {
 	if GetDryRun() {
 		fmt.Printf("DRYRUN: %s\n", s.GetSSHCli()+" \""+cli+"\"")
@@ -424,7 +430,7 @@ func (s *SSHStruct) SecureRemoteExecution(cli string) error {
 	// 	fmt.Println("---NOT setting verbose in session ---")
 	// }
 
-	VerbosePrintln("SecureRemoteExecution: " + cli)
+	//VerbosePrintln("SecureRemoteExecution: " + cli)
 	//if this.capture {
 	sessErr := session.Run(cli)
 	stdoutBytes, _ := io.ReadAll(&stdoutBuf)
@@ -804,7 +810,7 @@ func (srcssh *SSHStruct) crossCopyViaShell(srcFile string, tgtssh SSHStruct, tgt
 	cli := srcssh.CrossCopyCLI(srcFile, tgtssh, tgtFile)
 
 	var exe ExecStruct
-	exe = exe.Init().
+	exe.Init().
 		WithMainExecFunc(System3toCapturedString, cli).
 		WithSpinny(true).
 		WithCapture(true).
@@ -997,4 +1003,26 @@ func (s SSHStruct) GetRemoteFileHash(path string) (string, error) {
 		return "error", err
 	}
 	return strings.Trim(s.stdout, "\n"), nil
+}
+
+func (s *SSHStruct) Rsync(source string, target string) error {
+	return s.RsyncWithSwitches("-avz", source, target)
+}
+
+func (s *SSHStruct) RsyncWithSwitches(switches string, source string, target string) error {
+	sshCmd := "ssh -i " + ExpandTilde(s.Key)
+
+	// Construct the rsync command
+	cmd := exec.Command("rsync",
+		switches,
+		"-e", sshCmd,
+		source,
+		fmt.Sprintf("%s@%s:%s", s.User, s.Host, target),
+	)
+
+	// Run the command and capture output
+	output, err := cmd.CombinedOutput()
+	s.stdout = string(output)
+
+	return err
 }

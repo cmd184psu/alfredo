@@ -1051,12 +1051,35 @@ func LoadCredFileMap(filename string) (map[string]string, error) {
 	return credentials, nil
 }
 
+func FileAuthenticatePasscode(passcode, filename string) bool {
+	contents, err := ReadFileToSlice(filename, true)
+
+	if err != nil {
+		panic(err.Error())
+	}
+
+	for _, line := range contents {
+		if strings.EqualFold(line, "passcode:"+passcode) {
+			return true
+		}
+	}
+	return false
+}
+
 func FileAuthenticate(username, password, filename string) bool {
+	log.Printf("FileAuthenticate(%s,%s,%s)", username, password, filename)
+	if !FileExistsEasy(filename) {
+		return false
+	}
 	credmap, err := LoadCredFileMap(filename)
 
 	if err != nil {
 		panic(err.Error())
 	}
+	log.Printf("credmap=%v", credmap)
+	log.Printf("credmap[%s]=%s", username, credmap[username])
+	log.Printf("password=%s\n", password)
+	log.Printf("strings.EqualFold(credmap[%s],%s)=%v\n", username, password, strings.EqualFold(credmap[username], password))
 	return strings.EqualFold(credmap[username], password)
 }
 
@@ -1078,12 +1101,13 @@ func IsCgoEnabled() bool {
 
 func GenerateFilename(f string, suffix string) FilenameStruct {
 	var fns FilenameStruct
+	hasStats := true
 	fns.Parse(f)
 	if err := fns.GetStat(); err != nil {
-		panic(err.Error())
+		hasStats=false
 	}
 	newFileBase := fns.GetBase() + suffix
-	if !fns.hasDate {
+	if hasStats && !fns.hasDate {
 		newFileBase += fns.GetModTime()
 	}
 	fns.SetBase(newFileBase)

@@ -29,6 +29,7 @@ type ExecStruct struct {
 	mainExecFunc     ExecCallBackFunc
 	mainCli          string
 	watcherExecFunc  WatcherCallBackFunc
+	watcherPayload   []byte
 	progressExecFunc ProgressCallBackFunc
 	spinny           bool
 	capture          CaptureType
@@ -43,7 +44,7 @@ type ExecStruct struct {
 	request          string
 }
 
-func (ex ExecStruct) Init() ExecStruct {
+func (ex *ExecStruct) Init() *ExecStruct {
 	ex.dir = "."
 	ex.spinny = false
 	ex.watcherExecFunc = nil
@@ -60,34 +61,40 @@ func (ex ExecStruct) Init() ExecStruct {
 	return ex
 }
 
-func (ex ExecStruct) WithMainExecFunc(cb ExecCallBackFunc, cli string) ExecStruct {
+func (ex *ExecStruct) WithMainExecFunc(cb ExecCallBackFunc, cli string) *ExecStruct {
 	ex.mainExecFunc = cb
 	ex.mainCli = cli
 	return ex
 }
-func (ex ExecStruct) WithWatcherExecFunc(cb WatcherCallBackFunc) ExecStruct {
+func (ex *ExecStruct) WithWatcherExecFunc(cb WatcherCallBackFunc, payload []byte) *ExecStruct {
 	ex.watcherExecFunc = cb
+	ex.watcherPayload = payload
 	return ex
 }
-func (ex ExecStruct) WithProgressExecFunc(cb ProgressCallBackFunc) ExecStruct {
+
+func (ex ExecStruct) GetWatcherPayload() []byte {
+	return ex.watcherPayload
+}
+
+func (ex *ExecStruct) WithProgressExecFunc(cb ProgressCallBackFunc) *ExecStruct {
 	ex.progressExecFunc = cb
 	return ex
 }
 
-func (ex ExecStruct) WithSpinny(b bool) ExecStruct {
+func (ex *ExecStruct) WithSpinny(b bool) *ExecStruct {
 	ex.spinny = b
 	return ex
 }
 
-func (ex ExecStruct) WithHintInterface(i interface{}) ExecStruct {
+func (ex *ExecStruct) WithHintInterface(i interface{}) *ExecStruct {
 	ex.iface = i
 	return ex
 }
-func (ex ExecStruct) WithDirectory(d string) ExecStruct {
+func (ex *ExecStruct) WithDirectory(d string) *ExecStruct {
 	ex.dir = d
 	return ex
 }
-func (ex ExecStruct) WithCapture(c bool) ExecStruct {
+func (ex *ExecStruct) WithCapture(c bool) *ExecStruct {
 	if c {
 		ex.capture = CapBoth
 	} else {
@@ -96,34 +103,27 @@ func (ex ExecStruct) WithCapture(c bool) ExecStruct {
 	return ex
 }
 
-func (ex ExecStruct) WithCaptureBoth() ExecStruct {
+func (ex *ExecStruct) WithCaptureBoth() *ExecStruct {
 	ex.capture = CapBoth
 	return ex
 }
 
-func (ex ExecStruct) WithRequest(r string) ExecStruct {
-	ex.SetRequest(r)
-	return ex
-}
-
-func (ex *ExecStruct) SetRequest(r string) {
+func (ex *ExecStruct) WithRequest(r string) *ExecStruct {
 	ex.request = r
+	return ex
 }
 
 func (ex ExecStruct) GetRequest() string {
 	return ex.request
 }
 
-func (ex *ExecStruct) SetSSH(ssh SSHStruct) {
+func (ex *ExecStruct) WithSSH(ssh SSHStruct) *ExecStruct {
 	ex.ssh = ssh
 	ex.mainExecFunc = nil
 	ex.useSSH = true
-}
-
-func (ex ExecStruct) WithSSH(ssh SSHStruct) ExecStruct {
-	ex.SetSSH(ssh)
 	return ex
 }
+
 func (ex ExecStruct) GetSSH() SSHStruct {
 	return ex.ssh
 }
@@ -131,12 +131,9 @@ func (ex ExecStruct) GetSSH() SSHStruct {
 func (ex ExecStruct) GetMainCli() string {
 	return ex.mainCli
 }
-func (ex *ExecStruct) SetMainCli(cli string) {
-	ex.mainCli = cli
-}
 
-func (ex ExecStruct) WithMainCli(cli string) ExecStruct {
-	ex.SetMainCli(cli)
+func (ex *ExecStruct) WithMainCli(cli string) *ExecStruct {
+	ex.mainCli = cli
 	return ex
 }
 func (ex ExecStruct) GetIface() interface{} {

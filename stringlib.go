@@ -700,3 +700,14 @@ func DiffStringContainers(aLines, bLines []string) string {
 	}
 	return result.String()
 }
+
+func RemoveKeyPartialFromSlice(s string, slice []string) []string {
+	newSlice := make([]string, 0)
+	for _, v := range slice {
+		if !strings.Contains(strings.ToLower(v), strings.ToLower(s)) {
+			newSlice = append(newSlice, v)
+			//			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return newSlice
+}

@@ -474,6 +474,15 @@ func (has *HttpApiStruct) httpApiCallLocal(method string, uri string) error {
 	}
 	defer resp.Body.Close()
 	has.statusCode = resp.StatusCode
+
+	if has.statusCode == http.StatusBadRequest {
+		VerbosePrintln("======================")
+		VerbosePrintln("status was bad request")
+		VerbosePrintf("\tbut payload was %s", string(has.requestPayload))
+		VerbosePrintf("\tand response body was %s", string(has.responseBody))
+		VerbosePrintln("======================")
+	}
+
 	VerbosePrintf("ignore conflict? %s", TrueIsYes(has.IgnoreConflict))
 	if resp.StatusCode == http.StatusConflict && has.IgnoreConflict {
 		VerbosePrintln("status was conflict.. and now it's ok, because we're ignoring conflict")

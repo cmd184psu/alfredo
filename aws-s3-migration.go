@@ -217,6 +217,7 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 
 			if result.Success {
 				log.Printf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
+				log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
 			} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
 				log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
 					innerMgr.TargetS3.Bucket, result.SourceKey)

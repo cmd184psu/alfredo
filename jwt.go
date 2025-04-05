@@ -58,6 +58,7 @@ func GenerateJWTKey() string {
 type JwtCredentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	PassCode string `json:"passcode"`
 }
 
 type JwtClaims struct {

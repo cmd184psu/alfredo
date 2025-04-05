@@ -279,3 +279,80 @@ func equalSlices(a, b []string) bool {
 	}
 	return true
 }
+
+func TestRemoveKeyPartialFromSlice(t *testing.T) {
+	type args struct {
+		s     string
+		slice []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want []string
+	}{
+		{
+			name: "Remove partially matching key",
+			args: args{
+				s:     "ban",
+				slice: []string{"apple", "banana", "cherry"},
+			},
+			want: []string{"apple", "cherry"},
+		},
+		{
+			name: "No partial match found",
+			args: args{
+				s:     "date",
+				slice: []string{"apple", "banana", "cherry"},
+			},
+			want: []string{"apple", "banana", "cherry"},
+		},
+		{
+			name: "Remove partial match from empty slice",
+			args: args{
+				s:     "apple",
+				slice: []string{},
+			},
+			want: []string{},
+		},
+		{
+			name: "Remove partial match with case insensitivity",
+			args: args{
+				s:     "BAN",
+				slice: []string{"apple", "banana", "cherry"},
+			},
+			want: []string{"apple", "cherry"},
+		},
+		{
+			name: "Remove key when multiple partial matches exist",
+			args: args{
+				s:     "ban",
+				slice: []string{"apple", "banana", "band", "cherry"},
+			},
+			want: []string{"apple", "cherry"},
+		},
+		{
+			name: "Remove partial match from single-element slice",
+			args: args{
+				s:     "app",
+				slice: []string{"apple"},
+			},
+			want: []string{},
+		},
+		{
+			name: "Remove partial match that matches the last element",
+			args: args{
+				s:     "cher",
+				slice: []string{"apple", "banana", "cherry"},
+			},
+			want: []string{"apple", "banana"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RemoveKeyPartialFromSlice(tt.args.s, tt.args.slice); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("RemoveKeyPartialFromSlice() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

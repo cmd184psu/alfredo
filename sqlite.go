@@ -2,6 +2,7 @@ package alfredo
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 )
 
@@ -18,6 +19,7 @@ type DatabaseConfig struct {
 	Table   string `json:"table"`
 	SSHHost string `json:"ssh_host"`
 	SSHKey  string `json:"ssh_key"`
+	SSHUser string `json:"ssh_user"`
 }
 
 func (db *DatabaseStruct) LoadConfig(filePath string) error {
@@ -25,10 +27,13 @@ func (db *DatabaseStruct) LoadConfig(filePath string) error {
 	if err := ReadStructFromJSONFile(filePath, &config); err != nil {
 		return err
 	}
+	if len(config.SSHUser) == 0 {
+		config.SSHUser = os.Getenv("USER")
+	}
 
 	db.WithDbPath(config.DbPath).
 		WithTable(config.Table)
-	db.exe.WithSSH(config.SSHHost, config.SSHKey)
+	db.exe.WithSSH(config.SSHHost, config.SSHKey, config.SSHUser)
 
 	return nil
 }
@@ -112,11 +117,20 @@ func (db *DatabaseStruct) Query(query string) error {
 	return db.Execute()
 }
 
+func (db *DatabaseStruct) GetPayload() string {
+	return db.exe.GetRequestPayload()
+}
 func (db *DatabaseStruct) Count(sel string, where string) error {
+	if len(sel) == 0 || sel == "*" {
+		panic("Count requires a column name")
+	}
 	db.exe.WithRequestPayload(db.CountPayload(sel, where))
 	return db.Execute()
 }
 func (db *DatabaseStruct) Sum(sel string, where string) error {
+	if len(sel) == 0 || sel == "*" {
+		panic("Sum requires a column name")
+	}
 	VerbosePrintf("payload is: %s", db.SumPayload(sel, where))
 
 	db.exe.WithRequestPayload(db.SumPayload(sel, where))
@@ -124,6 +138,10 @@ func (db *DatabaseStruct) Sum(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Avg(sel string, where string) error {
+	if len(sel) == 0 || sel == "*" {
+		panic("Avg requires a column name")
+	}
+
 	db.exe.WithRequestPayload(db.AvgPayload(sel, where))
 	return db.Execute()
 }
@@ -155,4 +173,28 @@ func (db *DatabaseStruct) GetResultFloat() float64 {
 		return 0.0
 	}
 	return result
+}
+
+func DbSelfTest(dbPath string, query string) error {
+	if len(dbPath) == 0 {
+		return fmt.Errorf("db path is empty")
+	}
+	db := NewSQLiteDB()
+	db.WithDbPath(dbPath)
+
+	fmt.Printf("query was %q\n", query)
+	if err := db.Query(query); err != nil {
+		panic(err)
+		fmt.Println("error: ", err)
+		return err
+	}
+
+	if err := db.exe.DumpOutput().Execute(); err != nil {
+		panic(err)
+		fmt.Println("error: ", err)
+		return err
+	}
+	fmt.Println("result: ", db.exe.GetResponseBody())
+	fmt.Println("status code: ", db.exe.GetStatusCode())
+	return nil
 }

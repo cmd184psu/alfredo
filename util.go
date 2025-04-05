@@ -419,3 +419,7 @@ func GetPassCode(filename string) (string, error) {
 	}
 	return "", fmt.Errorf("no passcode found")
 }
+
+func EasyBoolErrIsFalse(r bool, err error) bool {
+	return r && err == nil
+}

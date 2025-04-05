@@ -19,7 +19,7 @@ func TestExecutiveNull(t *testing.T) {
 }
 func TestExecutiveCapturedNothing(t *testing.T) {
 	var exe ExecStruct
-	exe = exe.Init().
+	exe.Init().
 		WithMainExecFunc(System3toCapturedString, "/usr/bin/true").
 		WithSpinny(false).
 		WithCapture(true).
@@ -31,7 +31,7 @@ func TestExecutiveCapturedNothing(t *testing.T) {
 }
 func TestExecutiveCapturedEverything(t *testing.T) {
 	var exe ExecStruct
-	exe = exe.Init().
+	exe.Init().
 		WithMainExecFunc(System3toCapturedString, "find ./").
 		WithSpinny(false).
 		WithCapture(true).
@@ -44,7 +44,7 @@ func TestExecutiveCapturedEverything(t *testing.T) {
 
 func TestExecutiveNotExecutable(t *testing.T) {
 	var exe ExecStruct
-	exe = exe.Init().
+	exe.Init().
 		WithMainExecFunc(System3toCapturedString, "./exec.go").
 		WithSpinny(false).
 		WithCapture(true).
@@ -70,7 +70,7 @@ func TestExecutiveOverSSH(t *testing.T) {
 	fmt.Println(PrettyPrint(ssh))
 
 	var exe ExecStruct
-	exe = exe.Init().
+	exe.Init().
 		WithSSH(ssh).
 		WithMainCli("ls -lah").
 		WithSpinny(true).
@@ -192,7 +192,7 @@ func TestExecutiveSpinNoWatch(t *testing.T) {
 	ssh.Key = os.Getenv("HOME") + "/.ssh/id_rsa"
 
 	cli = "/usr/local/bin/md5sum"
-	tc.input = ex.Init().
+	ex.Init().
 		//		WithMainExecFunc(System3toCapturedString, cli).
 		WithMainCli(cli).
 		WithSpinny(false).
@@ -200,6 +200,7 @@ func TestExecutiveSpinNoWatch(t *testing.T) {
 		WithRequest("5555").
 		WithDirectory(".").
 		WithSSH(ssh)
+	tc.input = ex
 	tc.note = "echo to command with popen and capture output"
 
 	tc.err = nil

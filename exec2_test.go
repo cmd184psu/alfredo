@@ -2,6 +2,7 @@ package alfredo
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 		requestPayload string
 		sshHost        string
 		sshKey         string
+		sshUser        string
 		directory      string
 		timeout        time.Duration
 		showSpinny     bool
@@ -98,6 +100,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			name:           "remote md5sum 2",
 			sshHost:        "localhost",
 			sshKey:         ExpandTilde("~/.ssh/homelab_rsa"),
+			sshUser:        os.Getenv("USER"),
 			command:        "./md5sum",
 			directory:      "/usr/local/bin",
 			captureStdout:  true,
@@ -113,7 +116,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			executor := NewCLIExecutor().
 				WithCommand(tt.command, tt.args...).
 				WithRequestPayload(tt.requestPayload).
-				WithSSH(tt.sshHost, tt.sshKey).
+				WithSSH(tt.sshHost, tt.sshKey, tt.sshUser).
 				WithDirectory(tt.directory).
 				WithTimeout(tt.timeout).
 				WithSpinny(tt.showSpinny).
