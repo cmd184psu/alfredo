@@ -197,7 +197,7 @@ func (s3c *S3ClientSession) EstablishSession() error {
 		//		return errors.New("missing region")
 	}
 
-	VerbosePrintf("!!! ep:%s, ak/sk: %s/%s, fps: %s, r: %s", s3c.Endpoint, s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, TrueIsYes(true), s3c.Region)
+	VerbosePrintf("!!! ep:%s, ak: %s, fps: %s, r: %s", s3c.Endpoint, s3c.Credentials.AccessKey, TrueIsYes(true), s3c.Region)
 
 	awsConfig := aws.NewConfig().
 		WithEndpoint(s3c.Endpoint).
