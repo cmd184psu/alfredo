@@ -21,9 +21,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	//"github.com/dgrijalva/jwt-go"
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
 )
@@ -62,7 +61,7 @@ type JwtCredentials struct {
 
 type JwtClaims struct {
 	Username string `json:"username"`
-	jwt.StandardClaims
+	//jwt.StandardClaims
 }
 
 type JwtHttpsServerStruct struct {
@@ -220,23 +219,24 @@ func (jhs *JwtHttpsServerStruct) StartServer() error {
 }
 
 func (jhs *JwtHttpsServerStruct) UpdateClaims(username string, w http.ResponseWriter) {
-	expirationTime := time.Now().Add(ExpireTime * time.Minute)
-	claims := &JwtClaims{
-		Username: username,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: expirationTime.Unix(),
-		},
-	}
+	//expirationTime := time.Now().Add(ExpireTime * time.Minute)
+	// claims := &JwtClaims{
+	// 	Username: username,
+	// 	StandardClaims: jwt.StandardClaims{
+	// 		ExpiresAt: expirationTime.Unix(),
+	// 	},
+	// }
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(jhs.GetKey())
-	if err != nil {
-		log.Printf("Error signing token: %v", err) // Log the error
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+	// token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	// tokenString, err := token.SignedString(jhs.GetKey())
+	// if err != nil {
+	// 	log.Printf("Error signing token: %v", err) // Log the error
+	// 	w.WriteHeader(http.StatusInternalServerError)
+	// 	return
+	// }
+	// w.Header().Set("Content-Type", "application/json")
+	//json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+	json.NewEncoder(w).Encode(map[string]string{"token": "invalid"})
 
 }
 
@@ -257,24 +257,23 @@ func (jhs *JwtHttpsServerStruct) AuthMiddleware(next http.HandlerFunc) http.Hand
 			return
 		}
 
-		token, err := jwt.ParseWithClaims(bearerToken[1], &JwtClaims{}, func(token *jwt.Token) (interface{}, error) {
-			//return jwtKey, nil
-			return jhs.GetKey(), nil
-		})
+		// token, err := jwt.ParseWithClaims(bearerToken[1], &JwtClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// 	//return jwtKey, nil
+		// 	return jhs.GetKey(), nil
+		// })
 
-		if err != nil {
-			log.Printf("err3: %s", err.Error())
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
+		// if err != nil {
+		// 	log.Printf("err3: %s", err.Error())
+		// 	w.WriteHeader(http.StatusUnauthorized)
+		// 	return
+		// }
 
-		if claims, ok := token.Claims.(*JwtClaims); ok && token.Valid {
-			r.Header.Set("Username", claims.Username)
-			next.ServeHTTP(w, r)
-		} else {
-			log.Println("err4")
-			w.WriteHeader(http.StatusUnauthorized)
-		}
+		// if claims, ok := token.Claims.(*JwtClaims); ok && token.Valid {
+		// 	r.Header.Set("Username", claims.Username)
+		// 	next.ServeHTTP(w, r)
+		// } else {
+		w.WriteHeader(http.StatusUnauthorized)
+		//		}
 	}
 }
 
