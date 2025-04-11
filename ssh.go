@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -627,9 +628,16 @@ func (s *SSHStruct) Execute(cli string) error {
 	return s.SecureRemoteExecution(cli)
 }
 
+// need to mask this: -u %s:'%s'"
+func maskCurlPassword(cli string) string {
+	pattern := `-u (\S+):'([^']*)'`
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllString(cli, "-u $1:'********'")
+}
+
 func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error {
 	if GetDryRun() {
-		fmt.Printf("DRYRUN: send %s over pipe to %s\n", string(content), cli)
+		fmt.Printf("DRYRUN: send %s over pipe to %s\n", string(content), maskCurlPassword(cli))
 		return nil
 	}
 

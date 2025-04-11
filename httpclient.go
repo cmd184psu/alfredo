@@ -56,6 +56,7 @@ type HttpApiStruct struct {
 	Token          string `json:"token"`
 	Port           int    `json:"port"`
 	IgnoreConflict bool   `json:"ignoreConflict"`
+	enforceCertificates bool   `json:"enforceCertificates"`
 }
 
 func (has *HttpApiStruct) Load(filename string) error {
@@ -119,6 +120,11 @@ func (has HttpApiStruct) WithPayloadAny(v any) HttpApiStruct {
 	if err := has.SetPayloadAny(v); err != nil {
 		panic(err)
 	}
+	return has
+}
+
+func (has *HttpApiStruct) WithCertificateEnforcement(b bool) *HttpApiStruct{
+	has.enforceCertificates = b
 	return has
 }
 
@@ -424,7 +430,7 @@ func (has *HttpApiStruct) httpApiCallLocal(method string, uri string) error {
 	apiURL := has.getBaseURL() + FixURI(uri)
 	//HTTP client capable of ignoring self-signed certificate
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !has.enforceCertificates},
 	}
 	if has.Timeout == 0 {
 		has.Timeout = httpapi_default_timeout

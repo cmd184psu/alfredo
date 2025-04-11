@@ -50,20 +50,21 @@ type S3ClientSession struct {
 	Region      string       `json:"region"`
 	ObjectKey   string       `json:"key"`
 	//	Client      *s3.S3
-	Client            s3iface.S3API
-	Versioning        bool `json:"versioning"`
-	established       bool
-	keepBucket        bool
-	PolicyId          string `json:"policyid"`
-	session           *session.Session
-	ctx               context.Context
-	forceSSL          bool
-	logging           bool
-	maxConcurrency    int
-	skipSize          int64
-	Response          *http.Response
-	ContinuationToken *string
-	BatchSize         int `json:"batchSize"`
+	Client              s3iface.S3API
+	Versioning          bool `json:"versioning"`
+	established         bool
+	keepBucket          bool
+	PolicyId            string `json:"policyid"`
+	session             *session.Session
+	ctx                 context.Context
+	forceSSL            bool
+	logging             bool
+	maxConcurrency      int
+	skipSize            int64
+	Response            *http.Response
+	ContinuationToken   *string
+	BatchSize           int `json:"batchSize"`
+	enforceCertificates bool
 }
 
 // deep copy with a clean new session
@@ -88,7 +89,7 @@ func (s3c *S3ClientSession) DeepCopy() S3ClientSession {
 	retValue.Response = nil
 	retValue.ContinuationToken = nil
 	retValue.BatchSize = s3c.BatchSize
-
+	retValue.enforceCertificates = s3c.enforceCertificates
 	if err := retValue.EstablishSession(); err != nil {
 		panic(err.Error())
 	}
@@ -127,6 +128,10 @@ func (s3c *S3ClientSession) DoNotForceSSL() {
 	s3c.forceSSL = false
 }
 
+func (s3c *S3ClientSession) WithCertificateEnforcement(enforce bool) *S3ClientSession {
+	s3c.enforceCertificates = enforce
+	return s3c
+}
 func (s3c *S3ClientSession) SetEndpoint(sep string) {
 	if len(sep) == 0 {
 		panic("attempted to set endpoint to blank - use ClearEndpoint() instead")
@@ -181,7 +186,7 @@ func (s3c *S3ClientSession) EstablishSession() error {
 	VerbosePrintln("===== establishing S3 Session =========")
 	//this.sess
 	ct := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 
 	if len(s3c.Endpoint) == 0 {
@@ -340,7 +345,7 @@ func (s3c *S3ClientSession) createBucketWithPolicy() error {
 	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+s3c.generateSignature(date))
 	// Execute the HTTP request
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
@@ -628,7 +633,7 @@ func (s3c S3credStruct) GenerateAWSCLItoString(endpoint string, region string, u
 
 func (s3s S3ClientSession) ListBuckets() []string {
 	ct := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3s.enforceCertificates},
 	}
 
 	awsConfig := aws.NewConfig().
@@ -722,7 +727,7 @@ func (s3c S3ClientSession) IsVersioningEnabled() bool {
 	// Get the versioning status of the S3 bucket
 
 	ct := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 	VerbosePrintln(fmt.Sprintf("ak=%q,sk=%q,b=%q", s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, s3c.Bucket))
 	awsConfig := aws.NewConfig().
@@ -1751,7 +1756,7 @@ func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration,
 
 	// Execute the HTTP request
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
