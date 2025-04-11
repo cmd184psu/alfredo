@@ -40,7 +40,12 @@ func Untar(dst string, r io.Reader) error {
 		}
 
 		// the target location where the dir/file should be created
-		target := filepath.Join(dst, header.Name)
+		// Clean the path and ensure it is within the destination directory
+		cleanedPath := filepath.Clean(header.Name)
+		if strings.Contains(cleanedPath, "..") {
+			return fmt.Errorf("invalid file path: %s", cleanedPath)
+		}
+		target := filepath.Join(dst, cleanedPath)
 
 		// the following switch could also be done using fi.Mode(), not sure if there
 		// a benefit of using one vs. the other.
