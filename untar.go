@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Untar takes a destination path and a reader; a tar reader loops over the tarfile
