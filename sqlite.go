@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 const sqlite_bin = "/usr/bin/sqlite3"
@@ -41,7 +42,7 @@ func (db *DatabaseStruct) LoadConfig(filePath string) error {
 func NewSQLiteDB() *DatabaseStruct {
 	db := &DatabaseStruct{}
 	db.exe = NewCLIExecutor()
-	db.exe.WithCaptureStdout(true).
+	db.exe.WithCaptureStdout(true).WithCaptureStderr(true).
 		WithCommand(sqlite_bin, db.DbPath).
 		WithTrimWhiteSpace(true)
 	return db
@@ -69,7 +70,11 @@ func (db *DatabaseStruct) CLItarget() string {
 }
 
 func (db *DatabaseStruct) QueryPayload(sel string, where string) string {
-	var w string
+	if strings.Contains(where, "WHERE") {
+		panic("QueryPayload: where clause should not contain WHERE")
+	}
+
+	w := ""
 	if len(where) != 0 {
 		w = fmt.Sprintf(" WHERE %s", where)
 	}
@@ -77,18 +82,31 @@ func (db *DatabaseStruct) QueryPayload(sel string, where string) string {
 }
 
 func (db *DatabaseStruct) CountPayload(c string, where string) string {
+	if strings.Contains(where, "WHERE") {
+		panic("CountPayload: where clause should not contain WHERE")
+	}
 	return db.QueryPayload(fmt.Sprintf("COUNT(%s)", c), where)
 }
 func (db *DatabaseStruct) AvgPayload(c string, where string) string {
+	if strings.Contains(where, "WHERE") {
+		panic("AvgPayload: where clause should not contain WHERE")
+	}
 	return db.QueryPayload(fmt.Sprintf("AVG(%s)", c), where)
 }
 func (db *DatabaseStruct) SumPayload(c string, where string) string {
+	if strings.Contains(where, "WHERE") {
+		panic("SumPayload: where clause should not contain WHERE")
+	}
 	return db.QueryPayload(fmt.Sprintf("SUM(%s)", c), where)
 }
 
 //sqlite3 your_database.db "UPDATE your_table SET state = 1 WHERE size > 1000 AND state = 0;"
 
 func (db *DatabaseStruct) UpdatePayload(set string, where string) string {
+	if strings.Contains(where, "WHERE") {
+		panic("UpdatePayload: where clause should not contain WHERE")
+	}
+
 	var w string
 	if len(where) != 0 {
 		w = fmt.Sprintf(" WHERE %s", where)
@@ -96,6 +114,10 @@ func (db *DatabaseStruct) UpdatePayload(set string, where string) string {
 	return fmt.Sprintf("UPDATE %s SET %s%s;\n", db.Table, set, w)
 }
 func (db *DatabaseStruct) DeletePayload(where string) string {
+	if strings.Contains(where, "WHERE") {
+		panic("DeletePayload: where clause should not contain WHERE")
+	}
+
 	var w string
 	if len(where) == 0 {
 		panic("unable to delete everything with this function; where was empty")
@@ -104,6 +126,10 @@ func (db *DatabaseStruct) DeletePayload(where string) string {
 }
 
 func (db *DatabaseStruct) Delete(where string) error {
+	if strings.Contains(where, "WHERE") {
+		panic("Delete: where clause should not contain WHERE")
+	}
+
 	db.exe.WithRequestPayload(db.DeletePayload(where))
 	return db.Execute()
 }
@@ -121,6 +147,10 @@ func (db *DatabaseStruct) GetPayload() string {
 	return db.exe.GetRequestPayload()
 }
 func (db *DatabaseStruct) Count(sel string, where string) error {
+	if strings.Contains(where, "WHERE") {
+		panic("Count: where clause should not contain WHERE")
+	}
+
 	if len(sel) == 0 || sel == "*" {
 		panic("Count requires a column name")
 	}
@@ -128,6 +158,9 @@ func (db *DatabaseStruct) Count(sel string, where string) error {
 	return db.Execute()
 }
 func (db *DatabaseStruct) Sum(sel string, where string) error {
+	if strings.Contains(where, "WHERE") {
+		panic("Sum: where clause should not contain WHERE")
+	}
 	if len(sel) == 0 || sel == "*" {
 		panic("Sum requires a column name")
 	}
@@ -138,6 +171,10 @@ func (db *DatabaseStruct) Sum(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Avg(sel string, where string) error {
+	if strings.Contains(where, "WHERE") {
+		panic("Avg: where clause should not contain WHERE")
+	}
+
 	if len(sel) == 0 || sel == "*" {
 		panic("Avg requires a column name")
 	}
@@ -147,6 +184,10 @@ func (db *DatabaseStruct) Avg(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Update(set string, where string) error {
+	if strings.Contains(where, "WHERE") {
+		panic("Update: where clause should not contain WHERE")
+	}
+
 	db.exe.WithRequestPayload(db.UpdatePayload(set, where))
 	return db.Execute()
 }
@@ -179,22 +220,25 @@ func DbSelfTest(dbPath string, query string) error {
 	if len(dbPath) == 0 {
 		return fmt.Errorf("db path is empty")
 	}
+	var err error
 	db := NewSQLiteDB()
 	db.WithDbPath(dbPath)
 
 	fmt.Printf("query was %q\n", query)
-	if err := db.Query(query); err != nil {
-		panic(err)
+	//	if err := db.Query(query); err != nil {
+	err = db.Query(query)
+
+	if err != nil {
 		fmt.Println("error: ", err)
-		return err
 	}
 
-	if err := db.exe.DumpOutput().Execute(); err != nil {
-		panic(err)
-		fmt.Println("error: ", err)
-		return err
-	}
+	//	err = db.exe.DumpOutput().Execute(); err != nil {
+	err = db.exe.DumpOutput().Execute()
+
 	fmt.Println("result: ", db.exe.GetResponseBody())
 	fmt.Println("status code: ", db.exe.GetStatusCode())
-	return nil
+	if err != nil {
+		fmt.Println("error: ", err)
+	}
+	return err
 }

@@ -88,7 +88,7 @@ func TestHttpApiStruct_getBaseURL(t *testing.T) {
 				forceLocal:     tt.fields.forceLocal,
 				forceRemote:    tt.fields.forceRemote,
 				Secure:         tt.fields.Secure,
-				Token:          tt.fields.Token,
+				token:          tt.fields.Token,
 				Port:           tt.fields.Port,
 				IgnoreConflict: tt.fields.IgnoreConflict,
 			}
@@ -235,7 +235,7 @@ func TestHttpApiStruct_BuildCurlCLI(t *testing.T) {
 				forceLocal:     tt.fields.forceLocal,
 				forceRemote:    tt.fields.forceRemote,
 				Secure:         tt.fields.Secure,
-				Token:          tt.fields.Token,
+				token:          tt.fields.Token,
 				Port:           tt.fields.Port,
 				IgnoreConflict: tt.fields.IgnoreConflict,
 			}

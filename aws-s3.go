@@ -174,11 +174,11 @@ func (s3c S3ClientSession) KeepBucket() S3ClientSession {
 }
 
 func (s3c *S3ClientSession) EstablishSession() error {
-	VerbosePrintln("BEGIN S3ClientSession::EstablishSession()")
+//	VerbosePrintln("BEGIN S3ClientSession::EstablishSession()")
 	if s3c.established {
 		return nil
 	}
-	VerbosePrintln("===== establishing S3 Session =========")
+//	VerbosePrintln("===== establishing S3 Session =========")
 	//this.sess
 	ct := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -197,8 +197,9 @@ func (s3c *S3ClientSession) EstablishSession() error {
 		//		return errors.New("missing region")
 	}
 
-	VerbosePrintf("!!! ep:%s, ak/sk: %s/%s, fps: %s, r: %s", s3c.Endpoint, s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, TrueIsYes(true), s3c.Region)
-
+	if GetDebug() {
+		VerbosePrintf("!!! alfredo::s3c:EstablishSession ep:%s, ak/sk: %s/%s, fps: %s, r: %s", s3c.Endpoint, s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, TrueIsYes(true), s3c.Region)
+	}
 	awsConfig := aws.NewConfig().
 		WithEndpoint(s3c.Endpoint).
 		WithCredentials(credentials.NewStaticCredentials(s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, "")).
@@ -209,7 +210,7 @@ func (s3c *S3ClientSession) EstablishSession() error {
 	s3c.SetSession(session.Must(session.NewSession(awsConfig)))
 	s3c.Client = s3.New(s3c.GetSession())
 	s3c.established = true
-	VerbosePrintln("END S3ClientSession::EstablishSession()")
+	//VerbosePrintln("END S3ClientSession::EstablishSession()")
 	return nil
 }
 

@@ -170,6 +170,11 @@ func WriteSliceToFile(filename string, content []string) error {
 }
 
 func WriteStringToFile(filename string, content string) error {
+	if !FileExistsEasy(filepath.Dir(filename)) {
+		if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+			return err
+		}
+	}
 	f, err := os.OpenFile(filename+".tmp", os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
@@ -1104,7 +1109,7 @@ func GenerateFilename(f string, suffix string) FilenameStruct {
 	hasStats := true
 	fns.Parse(f)
 	if err := fns.GetStat(); err != nil {
-		hasStats=false
+		hasStats = false
 	}
 	newFileBase := fns.GetBase() + suffix
 	if hasStats && !fns.hasDate {

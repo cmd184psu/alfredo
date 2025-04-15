@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const (
@@ -63,7 +63,7 @@ type JwtCredentials struct {
 
 type JwtClaims struct {
 	Username string `json:"username"`
-	jwt.StandardClaims
+	jwt.RegisteredClaims
 }
 
 type JwtHttpsServerStruct struct {
@@ -253,11 +253,10 @@ func (jhs *JwtHttpsServerStruct) StartServer() error {
 }
 
 func (jhs *JwtHttpsServerStruct) UpdateClaims(username string, w http.ResponseWriter) {
-	expirationTime := time.Now().Add(ExpireTime * time.Minute)
 	claims := &JwtClaims{
 		Username: username,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: expirationTime.Unix(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ExpireTime * time.Minute)),
 		},
 	}
 

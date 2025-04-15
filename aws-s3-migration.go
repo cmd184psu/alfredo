@@ -183,6 +183,7 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 
 		atomic.AddInt64(&mgr.Progress.TotalObjects, 1)
 		atomic.AddInt64(&mgr.Progress.TotalBytes, size)
+
 		mgr.Lock()
 		newMgr := mgr.DeepCopy()
 		mgr.Unlock()
@@ -203,6 +204,7 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 			// 	objectKey,
 			// 	mgr.Progress,
 			// )
+			log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
 
 			err := innerMgr.MigrateObject(objectSize)
 
@@ -341,7 +343,7 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 					errorsChan <- fmt.Errorf("failed to upload part %d: %v", partNumber, err)
 					return
 				}
-				log.Printf("using etag: %s", *uploadOutput.ETag)
+				//log.Printf("using etag: %s", *uploadOutput.ETag)
 				parts[partNumber-1] = &s3.CompletedPart{
 					ETag:       uploadOutput.ETag,
 					PartNumber: aws.Int64(partNumber),
@@ -378,17 +380,15 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 		log.Fatal("errors occurred; some objects MPU were aborted as a result")
 		return fmt.Errorf("errors occurred; some objects MPU were aborted as a result")
 	}
-	log.Printf("Completing MPU for s3://%s/%s", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
-	log.Printf("supposedly completed %d parts", len(parts))
-	log.Printf("supposedly completed %d objects", mgr.Progress.MigratedObjects)
+	log.Printf("Completed %d parts, checking for nil etags", len(parts))
 	for i := 0; i < len(parts); i++ {
 		if parts[i] == nil {
 			log.Printf("part %d is nil", i)
 		} else {
-			log.Printf("part %d is not nil", i)
-			if *parts[i].PartNumber != int64(i) {
-				log.Printf("part %d has part number %d", i, parts[i].PartNumber)
-			}
+			//log.Printf("part %d is not nil", i)
+			// if *parts[i].PartNumber != int64(i) {
+			// 	log.Printf("part %d has part number %d", i, parts[i].PartNumber)
+			// }
 			if parts[i].ETag == nil {
 				log.Printf("part %d has nil etag", i)
 			}
@@ -408,6 +408,8 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 		log.Printf("MPU for s3://%s/%s => s3://%s/%s  failed to complete", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
 		return fmt.Errorf("failed to complete multipart upload: %v", err)
 	}
+	log.Printf("Completing MPU for s3://%s/%s", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
+	log.Printf("Completed %d objects", mgr.Progress.MigratedObjects)
 
 	VerbosePrintf("END CopyObjectBetweenBucketsMPU(%s, %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 
@@ -455,7 +457,6 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsRegular() error {
 }
 
 func (mgr *MigrationMgrStruct) MigrateObject(size int64) error {
-
 	log.Printf("Considering the migration of object %s/%s => %s/%s with size %d (%s)\n", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey, size, HumanReadableStorageCapacity(size))
 	if size > defaultPartSizeMax*10000 {
 		return fmt.Errorf("content length of %d is too large to process; api limitation exceeded", size)

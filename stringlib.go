@@ -169,6 +169,11 @@ func HumanReadableBigNumber(n int64) string {
 	return formattedStr
 }
 
+func HumanReadableTimeStamp(t int64) string {
+	d := time.Unix(t, 0)
+	return d.Format("2006-01-02 15:04:05 MST")
+}
+
 func TrimQuotes(s string) string {
 	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
 		return s[1 : len(s)-1]
@@ -356,13 +361,9 @@ func MD5SumString(s string) string {
 	return MD5SumBA([]byte(s))
 }
 
-func MD5SumFile(s string) (string, error) {
-	var result string
-	if err := System3toCapturedString(&result, "md5sum "+s); err != nil {
-		return "error", err
-	}
-
-	return result, nil
+func MD5SumFile(s string) string {
+	ex := NewCLIExecutor()
+	return ex.HashFile(s)
 }
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -710,4 +711,16 @@ func RemoveKeyPartialFromSlice(s string, slice []string) []string {
 		}
 	}
 	return newSlice
+}
+
+func WriteLineToFile(filePath, line string) error {
+	VerbosePrintf("write to file: %s", filePath)
+	file, err := os.OpenFile(ExpandTilde(filePath), os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(line + "\n")
+	return err
 }

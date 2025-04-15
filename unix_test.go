@@ -313,3 +313,51 @@ func TestGetProcessList(t *testing.T) {
 // 		})
 // 	}
 // }
+
+func TestWriteStringToFile(t *testing.T) {
+	type args struct {
+		filename string
+		content  string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "Write to existing file",
+			args: args{
+				filename: "/tmp/testfile.txt",
+				content:  "Hello, World!",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Write to non-existent directory",
+			args: args{
+				filename: "/tmp/nonexistentdir/testfile.txt",
+				content:  "Hello, World!",
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := WriteStringToFile(tt.args.filename, tt.args.content); (err != nil) != tt.wantErr {
+				t.Errorf("WriteStringToFile() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				// Verify file content
+				data, err := os.ReadFile(tt.args.filename)
+				if err != nil {
+					t.Errorf("Failed to read file: %v", err)
+				}
+				if string(data) != tt.args.content {
+					t.Errorf("File content mismatch. Expected: %s, Got: %s", tt.args.content, string(data))
+				}
+				// Clean up
+				os.Remove(tt.args.filename)
+			}
+		})
+	}
+}

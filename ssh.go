@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -62,7 +63,7 @@ type SSHStruct struct {
 	silent         bool
 	exitCode       int
 	ccmode         CrossCopyModeType
-	ConnectTimeout int `json:"connettimeout"` //ssh -o ConnectTimeout=10
+	ConnectTimeout int `json:"connecttimeout"` //ssh -o ConnectTimeout=10
 	request        string
 	//parentExe      *ExecStruct
 }
@@ -106,6 +107,9 @@ func (s *SSHStruct) CreateClientConfig() ssh.ClientConfig {
 	if s.ConnectTimeout == 0 {
 		s.ConnectTimeout = ssh_default_connection_timeout
 	}
+	if len(s.User) == 0 {
+		s.User = os.Getenv("USER")
+	}
 	return ssh.ClientConfig{
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		User:            s.User,
@@ -118,6 +122,8 @@ func (s *SSHStruct) CreateClientConfig() ssh.ClientConfig {
 
 func (s SSHStruct) SecureDownload(remoteFilePath string, localFilePath string) error {
 	// Parse the private key
+	VerbosePrintf("remoteFilePath: %s", remoteFilePath)
+	VerbosePrintf("localFilePath: %s", localFilePath)
 
 	// Create an SSH client configuration
 	config := s.CreateClientConfig()
@@ -296,7 +302,8 @@ func (s SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) err
 	return err
 }
 
-func (this SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath string) error {
+func (s SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath string) error {
+	localFilePath = ExpandTilde(localFilePath)
 	var err error
 	var wg sync.WaitGroup
 
@@ -308,7 +315,7 @@ func (this SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath
 		defer close(errorChan)
 		defer close(sigChan)
 
-		e := this.SecureDownload(remoteFilePath, localFilePath)
+		e := s.SecureDownload(remoteFilePath, localFilePath)
 		sigChan <- true
 		errorChan <- e
 	}()
@@ -318,7 +325,8 @@ func (this SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath
 	wg.Wait()
 	return err
 }
-func (this SSHStruct) SecureUploadAndSpin(localFilePath string, remoteFilePath string) error {
+func (s SSHStruct) SecureUploadAndSpin(localFilePath string, remoteFilePath string) error {
+	localFilePath = ExpandTilde(localFilePath)
 	var err error
 	var wg sync.WaitGroup
 
@@ -330,7 +338,7 @@ func (this SSHStruct) SecureUploadAndSpin(localFilePath string, remoteFilePath s
 		defer close(errorChan)
 		defer close(sigChan)
 
-		e := this.SecureUpload(localFilePath, remoteFilePath)
+		e := s.SecureUpload(localFilePath, remoteFilePath)
 		sigChan <- true
 		errorChan <- e
 	}()
@@ -722,7 +730,7 @@ func (s *SSHStruct) SecureRemotePipeExecution(content []byte, cli string) error 
 }
 
 func (s SSHStruct) NotConfigured() bool {
-	return len(s.Key) == 0 || len(s.Host) == 0 || len(s.User) == 0
+	return len(s.Key) == 0 || len(s.Host) == 0
 }
 
 const dd_cli_fmt = "dd if=%s of=%s bs=1k count=1 seek=%d"
@@ -943,7 +951,7 @@ func (s SSHStruct) RemoteCapturePid(jvm string, hint string) (int, error) {
 		return 0, fmt.Errorf(no_processes_found)
 	}
 	if len(jlist) > 1 {
-		return jlist[0], fmt.Errorf("multiple processes found, returning first")
+		VerbosePrintln("multiple processes found, returning first")
 	}
 	return jlist[0], nil
 }
@@ -999,7 +1007,7 @@ func (s SSHStruct) HammerTest() error {
 }
 
 func (s SSHStruct) GetRemoteFileHash(path string) (string, error) {
-	if err := s.SecureRemoteExecution(fmt.Sprintf("md5sum %q", path)); err != nil {
+	if err := s.SecureRemoteExecution(fmt.Sprintf("md5sum %s", path)); err != nil {
 		return "error", err
 	}
 	return strings.Trim(s.stdout, "\n"), nil
@@ -1025,4 +1033,172 @@ func (s *SSHStruct) RsyncWithSwitches(switches string, source string, target str
 	s.stdout = string(output)
 
 	return err
+}
+
+func (s *SSHStruct) GetLastModifiedTime(remoteFile string) (time.Time, error) {
+	// Execute the command to get the last modified time
+	if err := s.SecureRemoteExecution(fmt.Sprintf("stat -c %%Y %s", remoteFile)); err != nil {
+		return time.Time{}, err
+	}
+	epochSeconds, err := strconv.ParseInt(strings.TrimSpace(s.GetBody()), 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(epochSeconds, 0), nil
+}
+
+func (s *SSHStruct) SyncFileWithRemote(localFile string, remoteFile string, hashValidation bool, createDirectories bool) error {
+	// Check if the SSH connection is configured
+	localFile = ExpandTilde(localFile)
+	if s.NotConfigured() {
+		return fmt.Errorf("SSH connection not configured")
+	}
+	skipUpload := false
+	skipDownload := false
+
+	hashLocal := ""
+	hashRemote := ""
+
+	// Check if the local file exists
+	if _, err := os.Stat(localFile); os.IsNotExist(err) {
+		VerbosePrintf("local file does not exist: %s", localFile)
+		skipUpload = true
+		if createDirectories {
+			fmt.Println("Creating directories on local host...")
+			ex := NewCLIExecutor()
+			ex.WithCommand(fmt.Sprintf("mkdir -p %s", filepath.Dir(localFile)))
+			if err := ex.DumpOutput().Execute(); err != nil {
+				fmt.Printf("Unable to create local directories due to err: %s\n", err)
+				return err
+			}
+		}
+	}
+	// Check if the remote file exists
+
+	if !s.RemoteFileExists(remoteFile) {
+		VerbosePrintf("remote file does not exist: %s", remoteFile)
+		skipDownload = true
+		if createDirectories {
+			fmt.Println("Creating directories on remote host...")
+			if err := s.RemoteExecuteAndSpin(fmt.Sprintf("mkdir -p %s", filepath.Dir(remoteFile))); err != nil {
+				return err
+			}
+		}
+	}
+	// if err := s.SecureRemoteExecution(fmt.Sprintf("test -e %s", remoteFile)); err != nil {
+	// 	if strings.Contains(err.Error(), "No such file or directory") {
+	// 		// Remote file does not exist, proceed with upload
+	// 		VerbosePrintln("Remote file does not exist, proceeding with upload")
+	// 		skipDownload = true
+	// 	} else if strings.Contains(err.Error(), "Permission denied") {
+	// 		// Permission denied error, handle accordingly
+	// 		return fmt.Errorf("permission denied for remote file: %s", remoteFile)
+	// 	} else if strings.Contains(err.Error(), "Connection refused") {
+	// 		// SSH connection refused
+	// 		return fmt.Errorf("SSH connection refused")
+	// 	} else if strings.Contains(err.Error(), "i/o timeout") {
+	// 		// SSH connection timed out
+	// 		return fmt.Errorf("SSH connection timed out")
+	// 	} else {
+	// 		// Some other error occurred
+	// 		return fmt.Errorf("failed to check remote file: %v", err)
+	// 	}
+	// }
+
+	//at this point we've determined if the local file exists or not
+	// we've determined if the remote file exists or not
+	// we've determine that the remote hots is at least reachable
+	var localLastModified, remoteLastModified time.Time
+	var err error
+	if skipDownload {
+		remoteLastModified = time.Time{}
+	} else {
+		//this means the remote file does exist
+		remoteLastModified, err = s.GetLastModifiedTime(remoteFile)
+		if err != nil {
+			// Handle error
+			return fmt.Errorf("failed to get remote file last modified time: %v", err)
+		}
+		if hashValidation {
+			ex := NewCLIExecutor()
+			ex.WithSSHStruct(*s)
+			hashRemote = ex.HashFile(remoteFile)
+		}
+	}
+
+	if skipUpload {
+		localLastModified = time.Time{}
+	} else {
+		localLastModified, err = GetLastModifiedTime(localFile)
+		if err != nil {
+			// Handle error
+			return fmt.Errorf("failed to parse local file last modified time: %v", err)
+		}
+		if hashValidation {
+			ex := NewCLIExecutor()
+
+			VerbosePrintln("just before hashing local file")
+			hashLocal = ex.HashFile(localFile)
+			VerbosePrintln("just after hashing local file")
+			// if err != nil {
+			// 	return fmt.Errorf("failed to get local file hash: %v", err)
+			// }
+		}
+	}
+	if hashValidation {
+		if strings.EqualFold(hashLocal, hashRemote) {
+			VerbosePrintln("Hashes match, files are already in sync")
+			return nil
+		} else {
+			VerbosePrintln("Hashes do not match, proceeding with upload")
+
+		}
+	}
+	if localLastModified.After(remoteLastModified) {
+		// Local file is newer, upload it
+		VerbosePrintln("Local file is newer, proceeding with upload")
+		if err := s.SecureUploadAndSpin(localFile, remoteFile); err != nil {
+			return fmt.Errorf("failed to upload local file: %v", err)
+		}
+		if hashValidation {
+			ex := NewCLIExecutor()
+			ex.WithSSHStruct(*s)
+			// ex.HashFilePre(remoteFile)
+			// VerbosePrintln("just before hashing remote file")
+			// VerbosePrintf("here is the cli: %q", ex.GetCli())
+			// //			hashRemote = ex.HashFile(remoteFile)
+
+			// if err := ex.Execute(); err != nil {
+			// 	return fmt.Errorf("failed to get remote file hash: %v", err)
+			// }
+			// hashRemote = ex.HashFilePost()
+			hashRemote = ex.HashFile(remoteFile)
+			VerbosePrintln("just before hashing remote file")
+		}
+
+	} else {
+		// Remote file is newer, download it
+		VerbosePrintln("Remote file is newer, proceeding with download")
+		if err := s.SecureDownloadAndSpin(remoteFile, localFile); err != nil {
+			return fmt.Errorf("failed to download remote file: %v", err)
+		}
+		if hashValidation {
+			ex := NewCLIExecutor()
+
+			hashLocal = ex.HashFile(localFile)
+		}
+	}
+
+	if hashValidation && !strings.EqualFold(hashLocal, hashRemote) {
+		fmt.Printf("local hash: %q\n", hashLocal)
+		fmt.Printf("remote hash: %q\n", hashRemote)
+		return fmt.Errorf("file hashes do not match after transfer")
+	}
+
+	// Upload the file to the remote server
+	// if err := s.SecureUpload(localFile, remoteFile); err != nil {
+	// 	return fmt.Errorf("failed to upload file to remote server: %v", err)
+	// }
+
+	return nil
 }

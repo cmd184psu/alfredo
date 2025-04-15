@@ -228,7 +228,6 @@ func TestExecutiveSpinNoWatch(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	SetVerbose(true)
 	// Run the tests
 	os.Exit(m.Run())
 }

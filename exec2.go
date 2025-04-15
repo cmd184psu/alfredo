@@ -29,6 +29,7 @@ type CLIExecutor struct {
 	trimWhiteSpace bool
 	directory      string
 	dump           bool
+	debugSSH       bool
 }
 
 const default_timeout = 5 * time.Second
@@ -62,6 +63,19 @@ func (c *CLIExecutor) WithSSHStruct(s SSHStruct) *CLIExecutor {
 	c.sshHost = s.Host
 	c.sshKey = s.Key
 	c.sshUser = s.User
+	return c
+}
+
+func (c *CLIExecutor) GetSSH() SSHStruct {
+	return SSHStruct{
+		Host: c.sshHost,
+		Key:  c.sshKey,
+		User: c.sshUser,
+	}
+}
+
+func (c *CLIExecutor) WithSSHDebug(b bool) *CLIExecutor {
+	c.debugSSH = b
 	return c
 }
 
@@ -148,7 +162,37 @@ func (c *CLIExecutor) GetCli() string {
 	return fmt.Sprintf("%s %s", c.command, strings.Join(c.args, " "))
 }
 
+func (c *CLIExecutor) CreateSymlink(fromFile, toLink string) error {
+
+	if len(c.sshHost) > 0 {
+		c.AsLongRunning().WithCommand(fmt.Sprintf("ln -s %s %s", fromFile, toLink))
+		return c.DumpOutput().Execute()
+	}
+
+	cwd := EatErrorReturnString(os.Getwd())
+
+	if len(c.directory) > 0 {
+		if err := os.Chdir(c.directory); err != nil {
+			return fmt.Errorf("chdir to %s failed: %s", c.directory, err.Error())
+		}
+		defer func() {
+			if err := os.Chdir(cwd); err != nil {
+				panic(fmt.Sprintf("chdir to %s failed: %s", cwd, err.Error()))
+			}
+		}()
+	}
+	err := os.Symlink(fromFile, toLink)
+	if err != nil {
+		return fmt.Errorf("unable to create symlink %s -> %s: %s", fromFile, toLink, err.Error())
+	}
+
+	return nil
+}
+
 func (c *CLIExecutor) Execute() error {
+	if c.debugSSH || GetDebug() {
+		SetVerbose(true)
+	}
 	if GetDryRun() {
 		fmt.Println("DRYRUN: ", c.GetCli())
 		return nil
@@ -192,8 +236,29 @@ func (c *CLIExecutor) Execute() error {
 	// } else {
 	// 	VerbosePrintf("don't change directories\n")
 	// }
+
+	// VerbosePrintf("ssh host= %s\n", c.sshHost)
+	// VerbosePrintf("ssh user= %s\n", c.sshUser)
+	// VerbosePrintf("ssh key= %s\n", c.sshKey)
+	// VerbosePrintf("command: %s\n", c.command)
+	// VerbosePrintf("args: %s\n", strings.Join(c.args, " "))
+	if len(c.sshUser) == 0 {
+		c.sshUser = os.Getenv("USER")
+	}
+
 	if c.sshHost != "" {
-		cmd = exec.Command("/usr/bin/ssh", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command, strings.Join(c.args, " "))
+		if len(c.args) > 0 {
+			c.command = c.command + " " + strings.Join(c.args, " ")
+		}
+		if c.debugSSH || GetDebug() {
+			fmt.Println("key=" + c.sshKey)
+			fmt.Println("user=" + c.sshUser)
+			fmt.Println("host=" + c.sshHost)
+			fmt.Println("commmand=" + c.command + " " + strings.Join(c.args, " "))
+			cmd = exec.Command("/usr/bin/ssh", "-vvv", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command)
+		} else {
+			cmd = exec.Command("/usr/bin/ssh", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command)
+		}
 	} else {
 		VerbosePrintf("command: %s %s\n", c.command, strings.Join(c.args, " "))
 		cmd = exec.Command(c.command, c.args...)
@@ -209,7 +274,7 @@ func (c *CLIExecutor) Execute() error {
 		}
 	}
 	cmd.Env = os.Environ()
-	VerbosePrintf("Changed directory to %s (After env xfer)", EatErrorReturnString(os.Getwd()))
+	//VerbosePrintf("Changed directory to %s (After env xfer)", EatErrorReturnString(os.Getwd()))
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	if c.captureStdout {
@@ -303,6 +368,25 @@ func (c *CLIExecutor) showSpinner() {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
+}
+
+func (c *CLIExecutor) HashFile(fileName string) string {
+	if len(fileName) == 0 {
+		return ""
+	}
+	//does not make sense!
+
+	c.WithCommand("md5sum " + fileName).WithCaptureStdout(true).WithCaptureStderr(true)
+
+	if err := c.Execute(); err != nil {
+		panic("Error: " + err.Error())
+	}
+
+	split := strings.Split(c.GetResponseBody(), " ")
+	if len(split) < 2 {
+		return ""
+	}
+	return split[0]
 }
 
 func DDHumanReadableStorageSize(size int64) string {

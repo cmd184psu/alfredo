@@ -15,12 +15,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
+	"path/filepath"
 )
 
 // simply write a data interface to a json file; shamelessly picked off the internet
 func WriteStructToJSONFile(filePath string, structure interface{}) error {
+	if !FileExistsEasy(filepath.Dir(filePath)) {
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			return err
+		}
+	}
 	file, err := os.Create(filePath)
 	if err != nil {
 		return err
@@ -103,7 +108,7 @@ func PrettyPrintJSONFile(filePath string) {
 	// Replace "your_file.json" with the actual path to your JSON file
 
 	// Read the JSON file into memory
-	jsonData, err := ioutil.ReadFile(filePath)
+	jsonData, err := os.ReadFile(filePath)
 	if err != nil {
 		fmt.Println("Error reading JSON file:", err)
 		return

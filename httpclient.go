@@ -52,10 +52,11 @@ type HttpApiStruct struct {
 	Headers        map[string]string `json:"headers"`
 	forceLocal     bool
 	forceRemote    bool
-	Secure         bool   `json:"secure"`
-	Token          string `json:"token"`
+	Secure         bool `json:"secure"`
+	token          string
 	Port           int    `json:"port"`
 	IgnoreConflict bool   `json:"ignoreConflict"`
+	Passcode       string `json:"passcode"`
 }
 
 func (has *HttpApiStruct) Load(filename string) error {
@@ -377,8 +378,8 @@ func (has HttpApiStruct) BuildCurlCLI(method string, uri string) string {
 	if len(has.UserName) > 0 && len(has.Password) > 0 {
 		cli = fmt.Sprintf("%s -u %s:'%s'", cli, has.UserName, has.Password)
 	}
-	if len(has.Token) > 0 && !has.HasHeader(HEADER_AUTHORIZATION) {
-		has.SetHeader(HEADER_AUTHORIZATION, fmt.Sprintf("Bearer %s", has.Token))
+	if len(has.token) > 0 && !has.HasHeader(HEADER_AUTHORIZATION) {
+		has.SetHeader(HEADER_AUTHORIZATION, fmt.Sprintf("Bearer %s", has.token))
 	}
 	if !has.HasHeader(HEADER_CONTENT_TYPE) {
 		has.SetContentTypeHeaderJSON()
@@ -617,8 +618,8 @@ func FixURI(u string) string {
 
 func (has *HttpApiStruct) adjustHeaders() {
 	if !has.HasHeader(HEADER_AUTHORIZATION) {
-		if len(has.Token) > 0 {
-			has.SetHeader(HEADER_AUTHORIZATION, fmt.Sprintf("Bearer %s", has.Token))
+		if len(has.token) > 0 {
+			has.SetHeader(HEADER_AUTHORIZATION, fmt.Sprintf("Bearer %s", has.token))
 		} else if len(has.UserName) > 0 && len(has.Password) > 0 {
 			auth := fmt.Sprintf("%s:%s", has.UserName, has.Password)
 			has.SetHeader(HEADER_AUTHORIZATION, fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(auth))))
@@ -676,7 +677,9 @@ func (has *HttpApiStruct) AcquireTokenFromPasscode(passcode string) error {
 
 	has.SetPayload([]byte(fmt.Sprintf(`{"passcode":"%s"}`, passcode)))
 
-	has.HttpApiCall("POST", "/login")
+	if err := has.HttpApiCall("POST", "/login"); err != nil {
+		return err
+	}
 
 	if has.GetStatusCode() != http.StatusOK {
 		return fmt.Errorf("status code was %d", has.GetStatusCode())
@@ -686,7 +689,7 @@ func (has *HttpApiStruct) AcquireTokenFromPasscode(passcode string) error {
 
 	json.Unmarshal(has.GetResponseBody(), &pct)
 
-	has.Token = pct.Token
+	has.token = pct.Token
 
 	return nil
 }
@@ -715,4 +718,8 @@ func (has *HttpApiStruct) ParseFromURL(urlStr string) (string, error) {
 	}
 
 	return parsedURL.RequestURI(), nil
+}
+
+func (has *HttpApiStruct) GetToken() string {
+	return has.token
 }

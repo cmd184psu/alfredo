@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 // func TestExecutiveOverSSH(t *testing.T) {
@@ -406,6 +407,173 @@ func TestSSHStruct_CrossCopy(t *testing.T) {
 			}
 			if err := srcssh.CrossCopy(tt.args.srcFile, tt.args.tgtssh, tt.args.tgtFile); (err != nil) != tt.wantErr {
 				t.Errorf("SSHStruct.CrossCopyInMemory() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+
+func TestSSHStruct_SyncFileWithRemote(t *testing.T) {
+	//generate some files; files should contain the same content as their name
+	tmp := os.Getenv("HOME") + "/tmp"
+	WriteLineToFile(tmp+"/remotefile-older.txt", "remotefile-older")
+	time.Sleep(1 * time.Second)
+	WriteLineToFile(tmp+"/localfile-older.txt", "localfile-older")
+	time.Sleep(1 * time.Second)
+	if err := WriteLineToFile(tmp+"/localfile.txt", "localfile"); err != nil {
+		t.Errorf("failed to write localfile.txt: %s", err.Error())
+	}
+	time.Sleep(1 * time.Second)
+	WriteLineToFile(tmp+"/remotefile.txt", "remotefile")
+	//WriteLineToFile("/tmp/remotefile-dne.txt", "remotefile-dne")
+	time.Sleep(1 * time.Second)
+	WriteLineToFile(tmp+"/remotefile-newer.txt", "remotefile-newer")
+	time.Sleep(1 * time.Second)
+
+	type fields struct {
+		Key            string
+		User           string
+		Host           string
+		capture        bool
+		stdout         string
+		stderr         string
+		port           int
+		RemoteDir      string
+		silent         bool
+		exitCode       int
+		ccmode         CrossCopyModeType
+		ConnectTimeout int
+		request        string
+	}
+	type args struct {
+		localFile      string
+		remoteFile     string
+		hashValidation bool
+		createDirectories bool
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "sync valid local file to remote",
+			fields: fields{
+				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+				Host: "localhost",
+				port: 22,
+			},
+			args: args{
+				localFile:      tmp+"/localfile.txt",
+				remoteFile:     tmp+"/remotefile.txt",
+				hashValidation: true,
+				createDirectories: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "sync non-existent local file to remote",
+			fields: fields{
+				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+				Host: "localhost",
+				port: 22,
+			},
+			args: args{
+				localFile:      tmp+"/nonexistentfile.txt",
+				remoteFile:     tmp+"/remotefile.txt",
+				hashValidation: true,
+				createDirectories: false,
+			},
+			wantErr: false,
+		},
+		{
+
+			//test fails, but it should not.  The file is there, but ssh fails horribly trying to md5sum it
+			name: "sync valid local file to non-existent remote",
+			fields: fields{
+				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+				Host: "localhost",
+				port: 22,
+			},
+			args: args{
+				localFile:      tmp + "/localfile.txt",
+				remoteFile:     tmp + "/jumbolia/remotefile-dne.txt",
+				hashValidation: true,
+				createDirectories: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "sync valid local file (newer) to remote (older)",
+			fields: fields{
+				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+				Host: "localhost",
+				port: 22,
+			},
+			args: args{
+				localFile:      tmp+"/localfile.txt",
+				remoteFile:     tmp+"/remotefile-older.txt",
+				hashValidation: false,
+				createDirectories: false,
+			},
+			wantErr: false,
+		},
+
+		{
+			name: "sync valid local file (older) to remote (newer)",
+			fields: fields{
+				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+				Host: "localhost",
+				port: 22,
+			},
+			args: args{
+				localFile:      tmp+"/localfile-older.txt",
+				remoteFile:     tmp+"/remotefile-newer.txt",
+				hashValidation: false,
+				createDirectories: false,
+			},
+			wantErr: false,
+		},
+		{
+			name: "sync valid local file to invalid remote path",
+			fields: fields{
+				Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+				Host: "localhost",
+				port: 22,
+			},
+			args: args{
+				localFile:      tmp+"/localfile.txt",
+				remoteFile:     "/invalidpath/remotefile.txt",
+				hashValidation: true,
+				createDirectories: false,
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SSHStruct{
+				Key:            tt.fields.Key,
+				User:           tt.fields.User,
+				Host:           tt.fields.Host,
+				capture:        tt.fields.capture,
+				stdout:         tt.fields.stdout,
+				stderr:         tt.fields.stderr,
+				port:           tt.fields.port,
+				RemoteDir:      tt.fields.RemoteDir,
+				silent:         tt.fields.silent,
+				exitCode:       tt.fields.exitCode,
+				ccmode:         tt.fields.ccmode,
+				ConnectTimeout: tt.fields.ConnectTimeout,
+				request:        tt.fields.request,
+			}
+
+			fmt.Printf("syncronize %s with %s over ssh\n", tt.args.localFile, tt.args.remoteFile)
+			fmt.Printf("\tcat %s\n", tt.args.localFile)
+			fmt.Printf("\tcat %s\n", tt.args.remoteFile)
+			if err := s.SyncFileWithRemote(tt.args.localFile, tt.args.remoteFile, tt.args.hashValidation,tt.args.createDirectories); (err != nil) != tt.wantErr {
+				t.Errorf("SSHStruct.SyncFileWithRemote() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

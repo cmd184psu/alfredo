@@ -1,6 +1,7 @@
 package alfredo
 
 import (
+	"os"
 	"strings"
 	"time"
 )
@@ -47,4 +48,17 @@ func GetFirstOfMonthTimestamp() string {
 
 	// Format the time as per the specified format
 	return firstOfMonth.Format("2006-01-02T15:04:05.000Z")
+}
+
+// should stat the file and return the last modified time
+func GetLastModifiedTime(localFile string) (time.Time, error) {
+
+	// Get file info
+	fileInfo, err := os.Stat(ExpandTilde(localFile))
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// Return the last modified time
+	return fileInfo.ModTime(), nil
 }
