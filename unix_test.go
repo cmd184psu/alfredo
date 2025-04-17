@@ -198,10 +198,10 @@ func TestPopen3Grep(t *testing.T) {
 	}{
 		{
 			name:          "Basic grep",
-			cmd:           "echo 'hello world'",
+			cmd:           "echo \"hello world\"",
 			musthave:      "hello",
 			mustnothave:   "",
-			expectedLines: []string{"hello world"},
+			expectedLines: []string{"\"hello world\""},
 			expectError:   false,
 		},
 		{

@@ -415,7 +415,7 @@ func (has *HttpApiStruct) httpApiCallLocal(method string, uri string) error {
 
 	for h := range has.Headers {
 		if strings.EqualFold(h, HEADER_AUTHORIZATION) {
-			fmt.Printf("Authorization header === %s\n", has.Headers[h])
+			VerbosePrintf("Authorization header === %s\n", has.Headers[h])
 			break
 		}
 	}

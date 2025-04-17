@@ -389,6 +389,32 @@ func (c *CLIExecutor) HashFile(fileName string) string {
 	return split[0]
 }
 
+// use this instead of execute or local java processes
+func (c *CLIExecutor) CaptureJavaProcessList(jvm string) error {
+	c.WithCaptureStdout(true).WithCaptureStderr(true)
+	c.WithCommand("ps -eo pid,command").WithResponseBody("").WithTrimWhiteSpace(true)
+
+	if err := c.Execute(); err != nil {
+		return err
+	}
+
+	proclist, err := GetJavaProcessesFromBytes([]byte(c.responseBody), jvm)
+	if err != nil {
+		return err
+	}
+
+	c.responseBody = PrettyPrint(proclist)
+	return nil
+}
+
+func (c *CLIExecutor) GetProcListFromResponseBody() []ProcessInfo {
+	var proclist []ProcessInfo
+	if err := ReadStructFromString(c.responseBody, &proclist); err != nil {
+		return []ProcessInfo{}
+	}
+	return proclist
+}
+
 func DDHumanReadableStorageSize(size int64) string {
 	if size < 1024 {
 		return fmt.Sprintf("%d", size)

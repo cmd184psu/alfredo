@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -70,7 +69,6 @@ func System3toCapturedString(s *string, cmd string) error {
 	}
 
 	for i := st; i < len(arglist); i++ {
-		//		VerbosePrintf("arglist[%d]=%s", i, arglist[i]])
 		if strings.HasPrefix(arglist[i], "\"") {
 			for j := i; j < len(arglist); j++ {
 				arglist2 = append(arglist2, arglist[j])
@@ -521,7 +519,7 @@ func StringToFileOverSSH(outputContent string, remoteserver string, outputfile s
 
 func getsshclient(host string) (*ssh.Client, *ssh.Session, error) {
 
-	key, err := ioutil.ReadFile(GetPrivateSSHKey())
+	key, err := os.ReadFile(GetPrivateSSHKey())
 	if err != nil {
 		log.Fatalf("unable to read private key: %v", err)
 	}
@@ -835,26 +833,6 @@ type jpsProcStruct struct {
 	className string
 }
 
-//USAGE: (local)
-// jlist,err:=JPS() //list of all local java processes
-// pidlist:=JPSStructListToIntList(SliceToJPSStruct(jlist),"BucketMigrator") // convert to list of pids
-//
-// or
-//
-// fmt.Println(GetStringListFromJPS(SliceToJPSStruct(jlist)))
-
-//USAGE: (remote)
-// jlist,err:=s.RemoteJPS()
-// pidlist:=JPSStructListToIntList(SliceToJPSStruct(jlist),"BucketMigrator") // convert to list of pids
-//
-// or
-//
-// fmt.Println(GetStringListFromJPS(SliceToJPSStruct(jlist)))
-
-func JPS() ([]string, error) {
-	return Popen3Grep("ps aux", "java", "grep")
-}
-
 func SlicetoJPSStruct(lines []string, hint string) []jpsProcStruct {
 	// Iterate through the lines and filter for Java processes
 	var c string
@@ -947,24 +925,6 @@ func GetThreadCount(pid int) (int, error) {
 }
 
 const no_processes_found = "no processes found"
-
-func CaptureJavaPid(jvm string, hint string) (int, error) {
-	VerbosePrintln("BEGIN CapturePid(" + jvm + ")")
-	lines, err := JPS()
-	if err != nil {
-		VerbosePrintf("\treturning with err: %s", err.Error())
-		return 0, err
-	}
-	jlist := JPSStructListToIntList(SlicetoJPSStruct(lines, hint), jvm)
-	if len(jlist) == 0 {
-		return 0, fmt.Errorf(no_processes_found)
-	}
-	if len(jlist) > 1 {
-		return jlist[0], fmt.Errorf("multiple processes found, returning first")
-	}
-	VerbosePrintln("END CapturePid(" + jvm + ")")
-	return jlist[0], nil
-}
 
 func GetProcessList(mainHint string) ([]string, error) {
 	var capture string
@@ -1155,4 +1115,34 @@ func GetOutboundIP() string {
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 
 	return localAddr.IP.String()
+}
+
+func IsThisPortOpenIPV4(address string, port int) bool {
+	if !FileExistsEasy("/proc") {
+		panic("runtime error: OS does not support proc")
+	}
+	// Check if the port is open
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", address, port), time.Second)
+	if err != nil {
+		// Port is closed or not in use
+		return false
+	}
+	defer conn.Close()
+	// Port is open
+	return true
+}
+
+func IsThisPortOpenIPV6(address string, port int) bool {
+	if !FileExistsEasy("/proc") {
+		panic("runtime error: OS does not support proc")
+	}
+	// Check if the port is open
+	conn, err := net.DialTimeout("tcp6", fmt.Sprintf("[%s]:%d", address, port), time.Second)
+	if err != nil {
+		// Port is closed or not in use
+		return false
+	}
+	defer conn.Close()
+	// Port is open
+	return true
 }
