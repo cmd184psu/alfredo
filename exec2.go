@@ -104,6 +104,10 @@ func (c *CLIExecutor) DumpOutput() *CLIExecutor {
 }
 
 func (c *CLIExecutor) WithSpinny(show bool) *CLIExecutor {
+	if GetQuiet() {
+		c.showSpinny = false
+		return c
+	}
 	c.showSpinny = show
 	return c
 }

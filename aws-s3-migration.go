@@ -127,10 +127,13 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 				Error:       err,
 				Duration:    time.Since(startTime),
 				BytesCopied: objectSize,
+				WasSkipped:  innerMgr.TargetS3.WasSkipped,
 			}
 
 			if result.Success {
-				log.Printf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
+				if !result.WasSkipped {
+					VerbosePrintf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
+				}
 			} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
 				log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
 					innerMgr.TargetS3.Bucket, result.SourceKey)
@@ -204,7 +207,7 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 			// 	objectKey,
 			// 	mgr.Progress,
 			// )
-			log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
+			log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects + mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
 
 			err := innerMgr.MigrateObject(objectSize)
 
@@ -215,11 +218,14 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 				Error:       err,
 				Duration:    time.Since(startTime),
 				BytesCopied: objectSize,
+				WasSkipped:  innerMgr.TargetS3.WasSkipped,
 			}
 
 			if result.Success {
-				log.Printf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
-				log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
+				// if !result.WasSkipped {
+				// 	log.Printf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
+				// }
+				log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects + mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
 			} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
 				log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
 					innerMgr.TargetS3.Bucket, result.SourceKey)
@@ -237,7 +243,7 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 	}
 	log.Println("Waiting for this batch to complete")
 	wg.Wait()
-	log.Println("This batch to complete")
+	log.Println("This batch is completed")
 
 	return nil
 }
@@ -409,6 +415,8 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 		return fmt.Errorf("failed to complete multipart upload: %v", err)
 	}
 	log.Printf("Completing MPU for s3://%s/%s", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
+	//atomic.AddInt64(&mgr.Progress.CompletedBytes, *mgr.SourceHead.ContentLength)
+	atomic.AddInt64(&mgr.Progress.MigratedObjects, 1)
 	log.Printf("Completed %d objects", mgr.Progress.MigratedObjects)
 
 	VerbosePrintf("END CopyObjectBetweenBucketsMPU(%s, %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
@@ -493,7 +501,7 @@ func (mgr *MigrationMgrStruct) MigrateObject(size int64) error {
 	if mgr.TargetS3 == nil {
 		panic("TargetS3 is nil")
 	}
-
+	mgr.TargetS3.WasSkipped = false
 	if mgr.TargetS3.ObjectExists() {
 		//object exists, see if it's newer
 		log.Printf("Target object s3://%s/%s already exists\n", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
@@ -507,6 +515,9 @@ func (mgr *MigrationMgrStruct) MigrateObject(size int64) error {
 		if !GetForce() && tgtComesAfterSrc(*mgr.TargetHead, *mgr.SourceHead) {
 			log.Printf("Skipping object s3://%s/%s, target is newer than source\n", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
 			atomic.AddInt64(&mgr.Progress.SkippedObjects, 1)
+			atomic.AddInt64(&mgr.Progress.CompletedBytes, size)
+			//atomic.AddInt64(&mgr.Progress.MigratedObjects, 1) // added migration object for skipped object; don't do this
+			mgr.TargetS3.WasSkipped = true
 			return nil
 		}
 		VerbosePrintln("--- target exists, but it's older... moving on ---")

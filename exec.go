@@ -630,7 +630,9 @@ func GoFuncAndSpin(cb interface{}, params ...interface{}) error {
 		sigChan <- true
 		errorChan <- err
 	}()
-	go Spinny(sigChan)
+	if !GetQuiet() {
+		go Spinny(sigChan)
+	}
 	err = <-errorChan
 	wg.Wait()
 	return err

@@ -28,6 +28,7 @@ import (
 // the only global variable, Verbose is only used directly by the VerbosePrintln() function
 var verbose bool
 var force bool
+var quiet bool
 var debugVar bool
 var dryrunVar bool
 var panicOnFail bool
@@ -73,6 +74,13 @@ func SetPanic(p bool) {
 }
 func GetPanic() bool {
 	return getState("PANIC", panicOnFail)
+}
+func GetQuiet() bool {
+	return getState("QUIET", quiet)
+}
+func SetQuiet(q bool) {
+	quiet = q
+	os.Setenv("QUIET", "1")
 }
 
 func getState(e string, s bool) bool {

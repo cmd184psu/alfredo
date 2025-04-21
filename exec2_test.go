@@ -9,6 +9,7 @@ import (
 )
 
 func TestCLIExecutor_Execute(t *testing.T) {
+	SetQuiet(true)
 	tests := []struct {
 		name           string
 		command        string
@@ -64,6 +65,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			command:      "sleep",
 			args:         []string{"10"},
 			timeout:      1 * time.Second,
+			showSpinny: true,
 			wantOutput:   "",
 			wantExitCode: -1,
 			wantErr:      true,

@@ -1,6 +1,7 @@
 package alfredo
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -61,4 +62,20 @@ func GetLastModifiedTime(localFile string) (time.Time, error) {
 
 	// Return the last modified time
 	return fileInfo.ModTime(), nil
+}
+
+func SecondsToTimestamp(seconds int64) string {
+	// Convert seconds to time.Time
+	date := time.Unix(seconds, 0)
+
+	// Format the date and time components
+	year := date.Year()
+	month := fmt.Sprintf("%02d", int(date.Month()))
+	day := fmt.Sprintf("%02d", date.Day())
+	hours := fmt.Sprintf("%02d", date.Hour())
+	minutes := fmt.Sprintf("%02d", date.Minute())
+	secs := fmt.Sprintf("%02d", date.Second())
+
+	// Return the formatted string
+	return fmt.Sprintf("%d-%s-%s %s:%s:%s", year, month, day, hours, minutes, secs)
 }

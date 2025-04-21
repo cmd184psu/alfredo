@@ -64,6 +64,7 @@ type S3ClientSession struct {
 	Response          *http.Response
 	ContinuationToken *string
 	BatchSize         int `json:"batchSize"`
+	WasSkipped        bool
 }
 
 // deep copy with a clean new session
@@ -174,11 +175,11 @@ func (s3c S3ClientSession) KeepBucket() S3ClientSession {
 }
 
 func (s3c *S3ClientSession) EstablishSession() error {
-//	VerbosePrintln("BEGIN S3ClientSession::EstablishSession()")
+	//	VerbosePrintln("BEGIN S3ClientSession::EstablishSession()")
 	if s3c.established {
 		return nil
 	}
-//	VerbosePrintln("===== establishing S3 Session =========")
+	//	VerbosePrintln("===== establishing S3 Session =========")
 	//this.sess
 	ct := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -737,11 +738,11 @@ func S3HelperScriptBuiltInCredsDeepCleanCommon(region string, endpoint string, a
 	scriptLine = append(scriptLine, "while : ; do")
 	scriptLine = append(scriptLine, "\t# List all versions and delete markers in the bucket")
 	//OBJECTS_JSON=$(aws s3api list-object-versions ${AWS_OPTS} --bucket "$BUCKET_NAME" --max-items $MAX_KEYS)
-//	scriptLine= append(scriptLine, "\tOBJECTS_JSON=$(aws s3api list-object-versions ${AWS_OPTS} --bucket \"$BUCKET_NAME\" --max-items $MAX_KEYS --query '{Objects: (Versions || []), DeleteMarkers: (DeleteMarkers || [])}' --output json)")
-	scriptLine= append(scriptLine, "\tOBJECTS_JSON=$(aws s3api list-object-versions ${AWS_OPTS} --bucket \"$BUCKET_NAME\" --max-items $MAX_KEYS)")
+	//	scriptLine= append(scriptLine, "\tOBJECTS_JSON=$(aws s3api list-object-versions ${AWS_OPTS} --bucket \"$BUCKET_NAME\" --max-items $MAX_KEYS --query '{Objects: (Versions || []), DeleteMarkers: (DeleteMarkers || [])}' --output json)")
+	scriptLine = append(scriptLine, "\tOBJECTS_JSON=$(aws s3api list-object-versions ${AWS_OPTS} --bucket \"$BUCKET_NAME\" --max-items $MAX_KEYS)")
 	scriptLine = append(scriptLine, "\t# Extract objects to delete")
 	//DELETE_ITEMS=$(echo "$OBJECTS_JSON" | jq -c '[.Versions[], .DeleteMarkers[]?] | map({Key: .Key, VersionId: .VersionId})')
-	scriptLine = append(scriptLine,"\tDELETE_ITEMS=$(echo \"$OBJECTS_JSON\" | jq -c '[.Versions[], .DeleteMarkers[]?] | map({Key: .Key, VersionId: .VersionId})')")
+	scriptLine = append(scriptLine, "\tDELETE_ITEMS=$(echo \"$OBJECTS_JSON\" | jq -c '[.Versions[], .DeleteMarkers[]?] | map({Key: .Key, VersionId: .VersionId})')")
 	//scriptLine = append(scriptLine, "\tOBJECTS=$(echo \"$OBJECTS_JSON\" | jq -c '{Objects: ((.Objects + .DeleteMarkers) // [])}')")
 	scriptLine = append(scriptLine, "\t# Break if there are no more objects")
 	scriptLine = append(scriptLine, "COUNT=$(echo \"$DELETE_ITEMS\" | jq 'length')")
@@ -1073,7 +1074,7 @@ func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string, progress *Pro
 			}
 			fmt.Printf("\nUploaded %s to s3://%s/%s\n", path, s3c.Bucket, key)
 			VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, key)
-			atomic.AddInt64(&progress.MigratedObjects, 1)
+			atomic.AddInt64(&progress.MigratedObjects, 1) // after upload of an object via sync directory?
 			VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, key)
 		}
 		return nil
@@ -1125,6 +1126,7 @@ type CopyResult struct {
 	Error       error
 	BytesCopied int64
 	Duration    time.Duration
+	WasSkipped  bool
 }
 
 // type EndpointInfo struct {
@@ -1407,7 +1409,7 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 			return fmt.Errorf("failed to put object: %v", err)
 		}
 		VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
-		atomic.AddInt64(&progress.MigratedObjects, 1)
+		atomic.AddInt64(&progress.MigratedObjects, 1) //after upload of a non-MPU object
 		VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
 		atomic.AddInt64(&progress.CompletedBytes, *headOutputSrc.ContentLength)
 		return nil
@@ -1546,7 +1548,7 @@ func (sourceS3 S3ClientSession) CopyObjectBetweenBuckets(
 	}
 	log.Printf("MPU for s3://%s/%s successfully completed", targetS3.Bucket, targetKey)
 	VerbosePrintf("migrated/skipped before: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
-	atomic.AddInt64(&progress.MigratedObjects, 1)
+	atomic.AddInt64(&progress.MigratedObjects, 1) // after upload of an MPU object completed
 	VerbosePrintf("migrated/skipped after: %d/%d object:%s", progress.MigratedObjects, progress.SkippedObjects, targetKey)
 	return nil
 }

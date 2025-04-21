@@ -652,6 +652,9 @@ func ExecToFile(cli string, ofile string) (err error) {
 }
 
 func Spinny(sigChan chan bool) {
+	if GetQuiet() {
+		return
+	}
 	quit := false
 	for !quit {
 
