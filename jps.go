@@ -12,7 +12,7 @@ import (
 
 // ProcessInfo holds PID and className
 type ProcessInfo struct {
-	PID       int `json:"pid"`
+	PID       int    `json:"pid"`
 	ClassName string `json:"className"`
 }
 
@@ -34,6 +34,7 @@ func GetJavaProcesses(filterClassName string) ([]ProcessInfo, error) {
 // getJavaProcesses returns a slice of ProcessInfo, optionally filtered by className
 // sample line looks like this:
 // 65056 /bin/java -Xmx2g -Xmn400m -Dlog4j.configurationFile=log4j-bucket-tools.xml com.cloudian.tools.bucket.BucketMigration -c md -mode rebuild -ip 192.168.1.31 -tmp /opt/migration/_tmp_ -p migration.properties.bucket1 -retry n -valid off -quit n
+// 33423 /bin/java -Xmx2g -Xmn400m --add-opens java.base/java.math=ALL-UNNAMED --add-opens java.base/java.time=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util.concurrent=ALLUNNAMED --add-opens java.base/jdk.internal.misc=ALL-UNNAMED -XX:+EnableDynamicAgentLoading -Dlog4j.configurationFile=log4j-bucket-tools.xml com.cloudian.tools.bucket.BucketMigration -mode collect -c ver -tmp /opt/migration/_tmp_ -ip 192.168.1.31 -p migration.properties.versioning-bucket -retry n -v 3 -valid off -quit n
 func GetJavaProcessesFromBytes(output []byte, filterClassName string) ([]ProcessInfo, error) {
 	// Execute 'ps' command to list processes
 	if len(output) == 0 {
@@ -59,7 +60,9 @@ func GetJavaProcessesFromBytes(output []byte, filterClassName string) ([]Process
 			className := parseClassName(commandLine)
 			//fmt.Printf("pid=%d, classname:%s\n", pid, className)
 			if className != "" {
+				VerbosePrintf("comparing className: %s with %s", className, filterClassName)
 				if filterClassName == "" || strings.Contains(className, filterClassName) {
+					VerbosePrintln("\tappending")
 					processes = append(processes, ProcessInfo{PID: pid, ClassName: className})
 				}
 			}
@@ -74,7 +77,7 @@ func parseClassName(cmdLine string) string {
 	// e.g., java ... com.example.MainClass
 	parts := strings.Fields(cmdLine)
 	for _, part := range parts {
-		if !strings.Contains(part, ".jar") && strings.Contains(part, ".") && !strings.HasPrefix(part, "-") {
+		if !strings.Contains(part, ".jar") && strings.Contains(part, ".") && !strings.HasPrefix(part, "-") && !strings.Contains(part, "ALL-UNNAMED") {
 			splits := strings.Split(part, ".")
 			return splits[len(splits)-1]
 		}

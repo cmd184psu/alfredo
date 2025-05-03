@@ -15,7 +15,6 @@ import (
 
 type CLIExecutor struct {
 	command        string
-	args           []string
 	requestPayload string
 	sshHost        string
 	sshKey         string
@@ -41,9 +40,8 @@ func NewCLIExecutor() *CLIExecutor {
 	return ex.WithTimeout(t)
 }
 
-func (c *CLIExecutor) WithCommand(command string, args ...string) *CLIExecutor {
+func (c *CLIExecutor) WithCommand(command string) *CLIExecutor {
 	c.command = command
-	c.args = args
 	return c
 }
 
@@ -161,11 +159,18 @@ func (c *CLIExecutor) GetCli() string {
 		if len(c.sshUser) == 0 {
 			c.sshUser = os.Getenv("USER")
 		}
-		return fmt.Sprintf("/usr/bin/ssh -i %s %s@%s \"%s %s\"", ExpandTilde(c.sshKey), c.sshUser, c.sshHost, c.command, strings.Join(c.args, " "))
+		return fmt.Sprintf("/usr/bin/ssh -i %s %s@%s %q", ExpandTilde(c.sshKey), c.sshUser, c.sshHost, c.command)
 	}
-	return fmt.Sprintf("%s %s", c.command, strings.Join(c.args, " "))
+	return c.command
 }
 
+func (c *CLIExecutor) GetCommand() string {
+	return c.command
+}
+
+func (c *CLIExecutor) GetDirectory() string {
+	return c.directory
+}
 func (c *CLIExecutor) CreateSymlink(fromFile, toLink string) error {
 
 	if len(c.sshHost) > 0 {
@@ -221,18 +226,14 @@ func (c *CLIExecutor) Execute() error {
 			return fmt.Errorf("chdir to %q failed: %s", c.directory, err.Error())
 		}
 	}
-	if len(c.args) == 0 && len(c.command) == 0 {
+	if len(c.command) == 0 {
 		return fmt.Errorf("no command provided")
 	}
 	if len(c.directory) > 0 {
 		if len(c.sshHost) > 0 {
-			c.command = "cd " + c.directory + " && " + c.command
+			newcommand := "cd " + c.directory + " && " + c.command
+			c.command = newcommand
 		}
-	}
-	if len(c.args) == 0 && strings.Contains(c.command, " ") {
-		parts := strings.Split(c.command, " ")
-		c.command = parts[0]
-		c.args = parts[1:]
 	}
 	VerbosePrintf("cwd: %s\n", cwd)
 	// if len(c.directory) > 0 {
@@ -251,30 +252,25 @@ func (c *CLIExecutor) Execute() error {
 	}
 
 	if c.sshHost != "" {
-		if len(c.args) > 0 {
-			c.command = c.command + " " + strings.Join(c.args, " ")
-		}
 		if c.debugSSH || GetDebug() {
 			fmt.Println("key=" + c.sshKey)
 			fmt.Println("user=" + c.sshUser)
 			fmt.Println("host=" + c.sshHost)
-			fmt.Println("commmand=" + c.command + " " + strings.Join(c.args, " "))
+			fmt.Println("commmand=" + c.command)
 			cmd = exec.Command("/usr/bin/ssh", "-vvv", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command)
 		} else {
 			cmd = exec.Command("/usr/bin/ssh", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command)
 		}
 	} else {
-		VerbosePrintf("command: %s %s\n", c.command, strings.Join(c.args, " "))
-		cmd = exec.Command(c.command, c.args...)
+		VerbosePrintf("command: %s\n", c.command)
+		split := strings.Split(c.command, " ")
+		if len(split) > 1 {
+			cmd = exec.Command(split[0], split[1:]...)
+		} else {
+			cmd = exec.Command(c.command)
+		}
 		if len(c.directory) > 0 {
 			cmd.Dir = c.directory
-
-			// if err := os.Chdir(c.directory); err != nil {
-			// 	panic(err.Error())
-			// }
-
-			//			VerbosePrintf("Changed directory to %s", EatErrorReturnString(os.Getwd()))
-
 		}
 	}
 	cmd.Env = os.Environ()
@@ -395,14 +391,25 @@ func (c *CLIExecutor) HashFile(fileName string) string {
 
 // use this instead of execute or local java processes
 func (c *CLIExecutor) CaptureJavaProcessList(jvm string) error {
+	VerbosePrintf("BEGIN:: CaptureJavaProcessList(%s)", jvm)
+	defer VerbosePrintf("END:: CaptureJavaProcessList(%s)", jvm)
 	c.WithCaptureStdout(true).WithCaptureStderr(true)
-	c.WithCommand("ps -eo pid,command").WithResponseBody("").WithTrimWhiteSpace(true)
+	c.WithCommand("ps -eo pid,command").WithResponseBody("").WithTrimWhiteSpace(true).AsLongRunning()
+
+	fmt.Println("cli: ", c.GetCli())
 
 	if err := c.Execute(); err != nil {
 		return err
 	}
 
+	if len(c.responseBody) == 0 {
+		return fmt.Errorf("CaptureJavaProcessList():: no response body")
+	}
+
+	//VerbosePrintf("response body: %s", c.responseBody)
+
 	proclist, err := GetJavaProcessesFromBytes([]byte(c.responseBody), jvm)
+
 	if err != nil {
 		return err
 	}

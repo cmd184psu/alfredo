@@ -79,8 +79,8 @@ func ReadStructFromCommand(cli string, structure interface{}) error {
 	if err := System3toCapturedString(&s, cli); err != nil {
 		return err
 	}
-	VerbosePrintln("Alfredo:::ReadStructFromCommand(" + cli + ")")
-	VerbosePrintln("\ts=" + s)
+	// VerbosePrintln("Alfredo:::ReadStructFromCommand(" + cli + ")")
+	// VerbosePrintln("\ts=" + s)
 	return ReadStructFromString(s, &structure)
 }
 

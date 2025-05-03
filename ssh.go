@@ -1202,3 +1202,7 @@ func (s *SSHStruct) SyncFileWithRemote(localFile string, remoteFile string, hash
 
 	return nil
 }
+
+func (s *SSHStruct) Load(fileName string) error {
+	return ReadStructFromJSONFile(fileName, s)
+}

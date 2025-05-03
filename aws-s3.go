@@ -1588,7 +1588,7 @@ func GenerateROBucketPolicy(existingAcl BucketACLStruct) BucketACLStruct {
 }
 
 func (sourceS3 S3ClientSession) GetBucketACL() (string, error) {
-	VerbosePrintln("BEGIN: GetBucketACL(...)")
+	VerbosePrintln("BEGIN: aws-s3::GetBucketACL(...)")
 	if !sourceS3.established {
 		return "", fmt.Errorf("S3 session was not established")
 	}
@@ -1600,7 +1600,7 @@ func (sourceS3 S3ClientSession) GetBucketACL() (string, error) {
 		return "", err
 	}
 
-	VerbosePrintln("END: GetBucketACL(...)")
+	VerbosePrintln("END: aws-s3::GetBucketACL(...)")
 	return PrettyPrint(acl), nil
 }
 

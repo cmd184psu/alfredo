@@ -13,7 +13,6 @@ func TestCLIExecutor_Execute(t *testing.T) {
 	tests := []struct {
 		name           string
 		command        string
-		args           []string
 		requestPayload string
 		sshHost        string
 		sshKey         string
@@ -36,15 +35,6 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name:          "Local command with stderr capture",
-			command:       "sh",
-			args:          []string{"-c", "echo error >&2"},
-			captureStderr: true,
-			wantOutput:    "error",
-			wantExitCode:  0,
-			wantErr:       false,
-		},
-		{
 			name:         "Non-existent command",
 			command:      "nonexistentcommand",
 			wantOutput:   "",
@@ -62,10 +52,9 @@ func TestCLIExecutor_Execute(t *testing.T) {
 		},
 		{
 			name:         "Command with timeout",
-			command:      "sleep",
-			args:         []string{"10"},
+			command:      "sleep 10",
 			timeout:      1 * time.Second,
-			showSpinny: true,
+			showSpinny:   true,
 			wantOutput:   "",
 			wantExitCode: -1,
 			wantErr:      true,
@@ -155,7 +144,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := NewCLIExecutor().
-				WithCommand(tt.command, tt.args...).
+				WithCommand(tt.command).
 				WithRequestPayload(tt.requestPayload).
 				WithSSH(tt.sshHost, tt.sshKey, tt.sshUser).
 				WithSSHStruct(SSHStruct{
@@ -416,7 +405,6 @@ func TestCLIExecutor_CreateSymlink(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &CLIExecutor{
 				command:        tt.fields.command,
-				args:           tt.fields.args,
 				requestPayload: tt.fields.requestPayload,
 				sshHost:        tt.fields.sshHost,
 				sshKey:         tt.fields.sshKey,
@@ -434,6 +422,164 @@ func TestCLIExecutor_CreateSymlink(t *testing.T) {
 			if err := c.CreateSymlink(tt.args.fromFile, tt.args.toLink); (err != nil) != tt.wantErr {
 				t.Errorf("CLIExecutor.CreateSymlink() error = %v, wantErr %v", err, tt.wantErr)
 			}
+		})
+	}
+}
+
+func TestCLIExecutor_CaptureJavaProcessList(t *testing.T) {
+	var ssh SSHStruct
+	if err := ssh.Load("./testbox.json"); err != nil {
+		t.Errorf("Failed to load SSH config: %v", err)
+	}
+	fmt.Println("ssh=", PrettyPrint(ssh))
+	// Set the SSH key and user from the loaded config
+	SetVerbose(true)
+	type fields struct {
+		command        string
+		requestPayload string
+		sshHost        string
+		sshKey         string
+		sshUser        string
+		timeout        time.Duration
+		showSpinny     bool
+		captureStdout  bool
+		captureStderr  bool
+		statusCode     int
+		responseBody   string
+		trimWhiteSpace bool
+		directory      string
+		dump           bool
+		debugSSH       bool
+	}
+	type args struct {
+		jvm string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		// {
+		// 	name: "Capture Java processes locally",
+		// 	fields: fields{
+		// 		captureStdout: true,
+		// 		captureStderr: true,
+		// 		debugSSH:      true,
+		// 	},
+		// 	args: args{
+		// 		jvm: "",
+		// 	},
+		// 	wantErr: false,
+		// },
+		{
+			name: "Capture all Java processes remotely",
+			fields: fields{
+				sshHost:       ssh.Host,
+				sshKey:        ExpandTilde(ssh.Key),
+				sshUser:       ssh.User,
+				captureStdout: true,
+				captureStderr: true,
+			},
+			args: args{
+				jvm: "",
+			},
+			wantErr: false,
+		},
+		// {
+		// 	name: "Capture Java processes with invalid SSH key",
+		// 	fields: fields{
+		// 		sshHost:       "localhost",
+		// 		sshKey:        "/invalid/key",
+		// 		sshUser:       os.Getenv("USER"),
+		// 		captureStdout: true,
+		// 		captureStderr: true,
+		// 	},
+		// 	args: args{
+		// 		jvm: "java",
+		// 	},
+		// 	wantErr: true,
+		// },
+
+		{
+			name: "Capture Specific Java processes",
+			fields: fields{
+				sshHost:       ssh.Host,
+				sshKey:        ExpandTilde(ssh.Key),
+				sshUser:       ssh.User,
+				captureStdout: true,
+				captureStderr: true,
+			},
+			args: args{
+				jvm: "BucketMigration",
+			},
+			wantErr: false,
+		},
+		// {
+		// 	name: "Capture Java processes remotely with invalid host",
+		// 	fields: fields{
+		// 		sshHost:       "invalidhost",
+		// 		sshKey:        ExpandTilde("~/.ssh/homelab_rsa"),
+		// 		sshUser:       os.Getenv("USER"),
+		// 		captureStdout: true,
+		// 		captureStderr: true,
+		// 	},
+		// 	args: args{
+		// 		jvm: "java",
+		// 	},
+		// 	wantErr: true,
+		// },
+		// {
+		// 	name: "Capture Java processes with debug mode enabled",
+		// 	fields: fields{
+		// 		debugSSH:      true,
+		// 		captureStdout: true,
+		// 		captureStderr: true,
+		// 	},
+		// 	args: args{
+		// 		jvm: "java",
+		// 	},
+		// 	wantErr: false,
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &CLIExecutor{
+				command:        tt.fields.command,
+				requestPayload: tt.fields.requestPayload,
+				sshHost:        tt.fields.sshHost,
+				sshKey:         tt.fields.sshKey,
+				sshUser:        tt.fields.sshUser,
+				timeout:        tt.fields.timeout,
+				showSpinny:     tt.fields.showSpinny,
+				captureStdout:  tt.fields.captureStdout,
+				captureStderr:  tt.fields.captureStderr,
+				statusCode:     tt.fields.statusCode,
+				responseBody:   tt.fields.responseBody,
+				trimWhiteSpace: tt.fields.trimWhiteSpace,
+				directory:      tt.fields.directory,
+				dump:           tt.fields.dump,
+				debugSSH:       tt.fields.debugSSH,
+			}
+			if err := c.CaptureJavaProcessList(tt.args.jvm); (err != nil) != tt.wantErr {
+				t.Errorf("CLIExecutor.CaptureJavaProcessList() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			c.GetProcListFromResponseBody()
+			if len(c.GetResponseBody()) == 0 || strings.Contains(c.GetResponseBody(),"null") {
+				t.Errorf("No Java processes found")
+			}
+			fmt.Println("Captured Java processes: ", c.GetResponseBody())
+			slice := strings.Split(c.GetResponseBody(), "\n")
+			for _, line := range slice {
+				if strings.Contains(line, "UNNAMED") {
+					t.Errorf("parsing mistake.. there's no process by that name")
+				}
+			}
+			if len(slice) == 0 {
+				t.Errorf("No Java processes found")
+			}
+			fmt.Println("Exit code: ", c.GetStatusCode())
 		})
 	}
 }

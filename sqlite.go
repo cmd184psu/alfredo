@@ -43,14 +43,14 @@ func NewSQLiteDB() *DatabaseStruct {
 	db := &DatabaseStruct{}
 	db.exe = NewCLIExecutor()
 	db.exe.WithCaptureStdout(true).WithCaptureStderr(true).
-		WithCommand(sqlite_bin, db.DbPath).
+		WithCommand(sqlite_bin+ " "+ db.DbPath).
 		WithTrimWhiteSpace(true)
 	return db
 }
 
 func (db *DatabaseStruct) WithDbPath(path string) *DatabaseStruct {
 	db.DbPath = path
-	db.exe.WithCommand(sqlite_bin, db.DbPath)
+	db.exe.WithCommand(sqlite_bin +" "+ db.DbPath)
 	return db
 }
 
