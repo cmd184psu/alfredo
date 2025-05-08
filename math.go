@@ -1,6 +1,7 @@
 package alfredo
 
 import (
+	"math/rand"
 	"time"
 )
 
@@ -41,4 +42,11 @@ func CalculateETARaw(remaining int64, rateOfChange float64) int64 {
 		eta = 1
 	}
 	return eta
+}
+
+func GetRandomInt64InRange(min, max int64) int64 {
+	if min >= max {
+		return min
+	}
+	return min + rand.Int63n(max-min+1)
 }

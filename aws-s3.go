@@ -50,21 +50,22 @@ type S3ClientSession struct {
 	Region      string       `json:"region"`
 	ObjectKey   string       `json:"key"`
 	//	Client      *s3.S3
-	Client            s3iface.S3API
-	Versioning        bool `json:"versioning"`
-	established       bool
-	keepBucket        bool
-	PolicyId          string `json:"policyid"`
-	session           *session.Session
-	ctx               context.Context
-	forceSSL          bool
-	logging           bool
-	maxConcurrency    int
-	skipSize          int64
-	Response          *http.Response
-	ContinuationToken *string
-	BatchSize         int `json:"batchSize"`
-	WasSkipped        bool
+	Client              s3iface.S3API
+	Versioning          bool `json:"versioning"`
+	established         bool
+	keepBucket          bool
+	PolicyId            string `json:"policyid"`
+	session             *session.Session
+	ctx                 context.Context
+	forceSSL            bool
+	logging             bool
+	maxConcurrency      int
+	skipSize            int64
+	Response            *http.Response
+	ContinuationToken   *string
+	BatchSize           int `json:"batchSize"`
+	WasSkipped          bool
+	enforceCertificates bool
 }
 
 // deep copy with a clean new session
@@ -128,6 +129,10 @@ func (s3c *S3ClientSession) DoNotForceSSL() {
 	s3c.forceSSL = false
 }
 
+func (s3c *S3ClientSession) WithCertificateEnforcement(enforce bool) *S3ClientSession {
+	s3c.enforceCertificates = enforce
+	return s3c
+}
 func (s3c *S3ClientSession) SetEndpoint(sep string) {
 	if len(sep) == 0 {
 		panic("attempted to set endpoint to blank - use ClearEndpoint() instead")
@@ -182,11 +187,11 @@ func (s3c *S3ClientSession) EstablishSession() error {
 	//	VerbosePrintln("===== establishing S3 Session =========")
 	//this.sess
 	ct := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 
 	if len(s3c.Endpoint) == 0 {
-		return PanicError("missing endpoint")
+		return PanicError("aws-s3.go::S3ClientSession::EstablishSession(): missing endpoint")
 	}
 
 	if len(s3c.Credentials.AccessKey) == 0 {
@@ -264,6 +269,7 @@ func (this S3ClientSession) HeadBucket() (bool, error) {
 			return false, err
 		}
 	}
+
 	return true, nil
 }
 
@@ -343,7 +349,7 @@ func (s3c *S3ClientSession) createBucketWithPolicy() error {
 	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+s3c.generateSignature(date))
 	// Execute the HTTP request
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
@@ -483,11 +489,11 @@ func (s3c S3ClientSession) ListObjectsWithPrefix(prefix string) ([]string, error
 	return results, nil
 }
 
-func (this S3ClientSession) RecursiveBucketDelete() error {
+func (s3c S3ClientSession) RecursiveBucketDelete() error {
 	VerbosePrintln("BEGIN: RecursiveBucketDelete()")
 	var err error
 	var b bool
-	b, err = this.HeadBucket()
+	b, err = s3c.HeadBucket()
 	if err != nil {
 		return err
 	}
@@ -498,23 +504,24 @@ func (this S3ClientSession) RecursiveBucketDelete() error {
 
 	// List all objects in the bucket.
 	listObjectsInput := &s3.ListObjectsV2Input{
-		Bucket: aws.String(this.Bucket),
+		Bucket: aws.String(s3c.Bucket),
 	}
 
-	VerbosePrintln("bucket=" + this.Bucket)
+	VerbosePrintln("bucket=" + s3c.Bucket)
 
-	err = this.Client.ListObjectsV2Pages(listObjectsInput, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+	err = s3c.Client.ListObjectsV2Pages(listObjectsInput, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
 		VerbosePrintln("inside ListObjectsV2Pages")
 		VerbosePrintln(fmt.Sprintf("len(page.Content)=%d", len(page.Contents)))
 		for _, obj := range page.Contents {
 			// Delete each object.
+
 			deleteObjectInput := &s3.DeleteObjectInput{
-				Bucket: aws.String(this.Bucket),
+				Bucket: aws.String(s3c.Bucket),
 				Key:    obj.Key,
 			}
 			def := *obj.Key
 			VerbosePrintln(fmt.Sprintf("delete object: %s", def))
-			_, err := this.Client.DeleteObject(deleteObjectInput)
+			_, err := s3c.Client.DeleteObject(deleteObjectInput)
 			if err != nil {
 				if aerr, ok := err.(awserr.Error); ok {
 					fmt.Println("AWS Error:", aerr.Code(), aerr.Message())
@@ -524,6 +531,7 @@ func (this S3ClientSession) RecursiveBucketDelete() error {
 			} else {
 				fmt.Printf("Deleted object: %s\n", *obj.Key)
 			}
+
 		}
 
 		return !lastPage
@@ -534,21 +542,21 @@ func (this S3ClientSession) RecursiveBucketDelete() error {
 		os.Exit(1)
 	}
 
-	if this.keepBucket {
+	if s3c.keepBucket {
 		return nil
 	}
 
 	// Delete the bucket if it's empty (optional).
 	deleteBucketInput := &s3.DeleteBucketInput{
-		Bucket: aws.String(this.Bucket),
+		Bucket: aws.String(s3c.Bucket),
 	}
 	VerbosePrintln("attempt : DeleteBucket()")
 
-	_, err = this.Client.DeleteBucket(deleteBucketInput)
+	_, err = s3c.Client.DeleteBucket(deleteBucketInput)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			if strings.Contains(aerr.Code(), "BucketNotEmpty") {
-				fmt.Printf("Bucket %s is not empty; skipping deletion.\n", this.Bucket)
+				fmt.Printf("Bucket %s is not empty; skipping deletion.\n", s3c.Bucket)
 			} else {
 				fmt.Println("Error deleting bucket:", aerr.Code(), aerr.Message())
 			}
@@ -556,9 +564,159 @@ func (this S3ClientSession) RecursiveBucketDelete() error {
 			fmt.Println("Error:", err.Error())
 		}
 	} else {
-		fmt.Printf("Deleted bucket: %s\n", this.Bucket)
+		fmt.Printf("Deleted bucket: %s\n", s3c.Bucket)
 	}
 	VerbosePrintln("END: RecursiveBucketDelete()")
+
+	return err
+}
+
+func (s3c S3ClientSession) RecursiveBucketDeleteWithVersions() error {
+	VerbosePrintln("BEGIN: RecursiveBucketDeleteWithVersions()")
+	var err error
+	var b bool
+	b, err = s3c.HeadBucket()
+	if err != nil {
+		return err
+	}
+	// bucket does not exist, return clean
+	if !b {
+		return nil
+	}
+
+	// List all object versions in the bucket.
+	listVersionsInput := &s3.ListObjectVersionsInput{
+		Bucket: aws.String(s3c.Bucket),
+	}
+
+	VerbosePrintln("bucket=" + s3c.Bucket)
+
+	err = s3c.Client.ListObjectVersionsPages(listVersionsInput, func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
+		VerbosePrintln("inside ListObjectVersionsPages")
+		VerbosePrintln(fmt.Sprintf("len(page.Versions)=%d", len(page.Versions)))
+		for _, version := range page.Versions {
+			// Delete each object version.
+			deleteObjectInput := &s3.DeleteObjectInput{
+				Bucket:    aws.String(s3c.Bucket),
+				Key:       version.Key,
+				VersionId: version.VersionId,
+			}
+			VerbosePrintln(fmt.Sprintf("delete object version: %s (version ID: %s)", *version.Key, *version.VersionId))
+			_, err := s3c.Client.DeleteObject(deleteObjectInput)
+			if err != nil {
+				if aerr, ok := err.(awserr.Error); ok {
+					fmt.Println("AWS Error:", aerr.Code(), aerr.Message())
+				} else {
+					fmt.Println("Error:", err.Error())
+				}
+			} else {
+				fmt.Printf("Deleted object version: %s (version ID: %s)\n", *version.Key, *version.VersionId)
+			}
+		}
+
+		VerbosePrintln(fmt.Sprintf("len(page.DeleteMarkers)=%d", len(page.DeleteMarkers)))
+		for _, marker := range page.DeleteMarkers {
+			// Delete each delete marker.
+			deleteMarkerInput := &s3.DeleteObjectInput{
+				Bucket:    aws.String(s3c.Bucket),
+				Key:       marker.Key,
+				VersionId: marker.VersionId,
+			}
+			VerbosePrintln(fmt.Sprintf("delete marker: %s (version ID: %s)", *marker.Key, *marker.VersionId))
+			_, err := s3c.Client.DeleteObject(deleteMarkerInput)
+			if err != nil {
+				if aerr, ok := err.(awserr.Error); ok {
+					fmt.Println("AWS Error:", aerr.Code(), aerr.Message())
+				} else {
+					fmt.Println("Error:", err.Error())
+				}
+			} else {
+				fmt.Printf("Deleted delete marker: %s (version ID: %s)\n", *marker.Key, *marker.VersionId)
+			}
+		}
+
+		return !lastPage
+	})
+
+	if err != nil {
+		fmt.Println("Error listing object versions:", err)
+		os.Exit(1)
+	}
+
+	if s3c.keepBucket {
+		return nil
+	}
+
+	// Delete the bucket if it's empty (optional).
+	deleteBucketInput := &s3.DeleteBucketInput{
+		Bucket: aws.String(s3c.Bucket),
+	}
+	VerbosePrintln("attempt : DeleteBucket()")
+
+	_, err = s3c.Client.DeleteBucket(deleteBucketInput)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			if strings.Contains(aerr.Code(), "BucketNotEmpty") {
+				fmt.Printf("Bucket %s is not empty; skipping deletion.\n", s3c.Bucket)
+			} else {
+				fmt.Println("Error deleting bucket:", aerr.Code(), aerr.Message())
+			}
+		} else {
+			fmt.Println("Error:", err.Error())
+		}
+	} else {
+		fmt.Printf("Deleted bucket: %s\n", s3c.Bucket)
+	}
+	VerbosePrintln("END: RecursiveBucketDeleteWithVersions()")
+
+	return err
+}
+
+func (s3c S3ClientSession) DeleteObject(object string) error {
+	if len(s3c.Bucket) == 0 {
+		return errors.New("missing bucket,coding mistake")
+	}
+	if len(object) == 0 {
+		return errors.New("missing object, coding mistake")
+	}
+	_, err := s3c.Client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(s3c.Bucket), Key: aws.String(object)})
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			if strings.Contains(aerr.Code(), "NoSuchKey") {
+				return nil
+			}
+		}
+	}
+	return err
+}
+
+func (s3c S3ClientSession) DeleteObjectVersions(object string) error {
+	if len(s3c.Bucket) == 0 {
+		return errors.New("missing bucket, coding mistake")
+	}
+	if len(object) == 0 {
+		return errors.New("missing object, coding mistake")
+	}
+
+	// List all versions of the object
+	listVersionsInput := &s3.ListObjectVersionsInput{
+		Bucket: aws.String(s3c.Bucket),
+		Prefix: aws.String(object),
+	}
+
+	err := s3c.Client.ListObjectVersionsPages(listVersionsInput, func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
+		for _, version := range page.Versions {
+			_, err := s3c.Client.DeleteObject(&s3.DeleteObjectInput{
+				Bucket:    aws.String(s3c.Bucket),
+				Key:       version.Key,
+				VersionId: version.VersionId,
+			})
+			if err != nil {
+				return false
+			}
+		}
+		return !lastPage
+	})
 
 	return err
 }
@@ -629,16 +787,16 @@ func (s3c S3credStruct) GenerateAWSCLItoString(endpoint string, region string, u
 		fmt.Sprintln("alias cs3api='aws s3api $AWSOPTS 2>/dev/null'")
 }
 
-func (s3s S3ClientSession) ListBuckets() []string {
+func (s3c S3ClientSession) ListBuckets() []string {
 	ct := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 
 	awsConfig := aws.NewConfig().
-		WithEndpoint(s3s.Endpoint).
-		WithCredentials(credentials.NewStaticCredentials(s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, "")).
+		WithEndpoint(s3c.Endpoint).
+		WithCredentials(credentials.NewStaticCredentials(s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, "")).
 		WithS3ForcePathStyle(true).
-		WithRegion(s3s.Region).
+		WithRegion(s3c.Region).
 		WithHTTPClient(&http.Client{Transport: ct})
 
 	sess := session.Must(session.NewSession(awsConfig))
@@ -651,13 +809,11 @@ func (s3s S3ClientSession) ListBuckets() []string {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			default:
-				VerbosePrintf("(1) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
 				panic(aerr.Error())
 			}
 		} else {
 			// Print the error, cast err to awserr.Error to get the Code and
 			// Message from an error.
-			VerbosePrintf("(2) endpoint %s, credentials: %s/%s, region: %s", s3s.Endpoint, s3s.Credentials.AccessKey, s3s.Credentials.SecretKey, s3s.Region)
 			panic(err.Error())
 		}
 	}
@@ -786,9 +942,12 @@ func S3HelperScriptBuiltInCredsCreateBucket(region string, endpoint string, ak s
 	return strings.Join(scriptLine, "\n")
 }
 
-func (s3c S3ClientSession) IsVersioningEnabled() bool {
+func (s3c S3ClientSession) IsVersioningEnabled() error {
 	if len(s3c.Bucket) == 0 {
-		panic("bucket is not set")
+		panic("aws-s3.go::IsVersioningEnabled():: bucket is not set")
+	}
+	if len(s3c.Endpoint) == 0 {
+		panic("aws-s3.go::IsVersioningEnabled():: endpoint is not set")
 	}
 	if err := s3c.EstablishSession(); err != nil {
 		panic(err.Error())
@@ -797,9 +956,9 @@ func (s3c S3ClientSession) IsVersioningEnabled() bool {
 	// Get the versioning status of the S3 bucket
 
 	ct := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
-	VerbosePrintln(fmt.Sprintf("ak=%q,sk=%q,b=%q", s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, s3c.Bucket))
+
 	awsConfig := aws.NewConfig().
 		WithEndpoint(s3c.Endpoint).
 		WithCredentials(credentials.NewStaticCredentials(s3c.Credentials.AccessKey, s3c.Credentials.SecretKey, "")).
@@ -824,8 +983,8 @@ func (s3c S3ClientSession) IsVersioningEnabled() bool {
 	// Check if versioning is enabled
 
 	VerbosePrintf("Versioning status=%q", aws.StringValue(result.Status))
-
-	return strings.EqualFold(aws.StringValue(result.Status), "Enabled")
+	s3c.Versioning = strings.EqualFold(aws.StringValue(result.Status), "Enabled")
+	return nil
 }
 
 type AWSProfile struct {
@@ -1003,9 +1162,9 @@ func (r *ProgressReader) Read(p []byte) (int, error) {
 }
 func (s3c *S3ClientSession) EnableLogging(l bool) {
 	s3c.logging = l
-	if s3c.logging {
-		log.Println("Logging is now enabled (S3ClientSession)")
-	}
+	// if s3c.logging {
+	// 	log.Println("Logging is now enabled (S3ClientSession)")
+	// }
 }
 func (s3c S3ClientSession) S3SyncDirectoryToBucket(dirPath string, progress *ProgressTracker) error {
 	uploader := s3manager.NewUploader(s3c.GetSession())
@@ -1586,6 +1745,12 @@ func GenerateROBucketPolicy(existingAcl BucketACLStruct) BucketACLStruct {
 	newAcl.Grants = append(newAcl.Grants, CreateGrant(newAcl.Owner.BucketOwnerID, "READ_ACP"))
 	return newAcl
 }
+func GenerateDefaultBucketPolicy(existingAcl BucketACLStruct) BucketACLStruct {
+	var newAcl BucketACLStruct
+	newAcl.Owner.BucketOwnerID = existingAcl.Owner.BucketOwnerID
+	newAcl.Grants = append(newAcl.Grants, CreateGrant(newAcl.Owner.BucketOwnerID, "FULL_CONTROL"))
+	return newAcl
+}
 
 func (sourceS3 S3ClientSession) GetBucketACL() (string, error) {
 	VerbosePrintln("BEGIN: aws-s3::GetBucketACL(...)")
@@ -1830,7 +1995,7 @@ func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration,
 
 	// Execute the HTTP request
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)

@@ -501,6 +501,18 @@ func (ssh SSHStruct) RenameRemoteFile(oldfile string, newfile string) error {
 func (ssh SSHStruct) RemoveRemoteFile(file string) error {
 	return ssh.SecureRemoteExecution(fmt.Sprintf("rm -vf %s", file))
 }
+func (ssh SSHStruct) RemoveRemoteDir(dir string) error {
+	if strings.Contains(dir, "*") {
+		panic("wildcard not allowed")
+	}
+	if len(dir) < 2 {
+		panic("dir name too short")
+	}
+	if !strings.HasSuffix(dir, "/") {
+		dir = dir + "/"
+	}
+	return ssh.SecureRemoteExecution(fmt.Sprintf("rm -rf %q", dir))
+}
 
 func (s SSHStruct) GetRemoteHostname() (string, error) {
 	if err := s.SecureRemoteExecution("hostname -s"); err != nil {

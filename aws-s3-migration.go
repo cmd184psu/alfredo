@@ -207,7 +207,8 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 			// 	objectKey,
 			// 	mgr.Progress,
 			// )
-			log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects + mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
+			log.Printf("Objects skipped: %d / %d", mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
+			log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
 
 			err := innerMgr.MigrateObject(objectSize)
 
@@ -225,7 +226,8 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 				// if !result.WasSkipped {
 				// 	log.Printf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
 				// }
-				log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects + mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
+				log.Printf("Objects skipped: %d / %d", mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
+				log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
 			} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
 				log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
 					innerMgr.TargetS3.Bucket, result.SourceKey)
@@ -416,8 +418,8 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 	}
 	log.Printf("Completing MPU for s3://%s/%s", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
 	//atomic.AddInt64(&mgr.Progress.CompletedBytes, *mgr.SourceHead.ContentLength)
-	atomic.AddInt64(&mgr.Progress.MigratedObjects, 1)
-	log.Printf("Completed %d objects", mgr.Progress.MigratedObjects)
+	//atomic.AddInt64(&mgr.Progress.MigratedObjects, 1)
+	log.Printf("Completed %d objects", mgr.Progress.MigratedObjects+1)
 
 	VerbosePrintf("END CopyObjectBetweenBucketsMPU(%s, %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 
@@ -543,7 +545,9 @@ func (mgr *MigrationMgrStruct) MigrateObject(size int64) error {
 	atomic.AddInt64(&mgr.Progress.MigratedObjects, 1)
 
 	//bytes already counted in the copy function
-
+	log.Printf("Objects skipped: %d / %d", mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
+	log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
+	log.Printf("Completed %d objects", mgr.Progress.MigratedObjects)
 	return nil
 }
 

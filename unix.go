@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -1120,7 +1121,7 @@ func GetOutboundIP() string {
 	return localAddr.IP.String()
 }
 
-func IsThisPortOpenIPV4(address string, port int) bool {
+func CheckOpenPortIPV4(address string, port int) bool {
 	if !FileExistsEasy("/proc") {
 		panic("runtime error: OS does not support proc")
 	}
@@ -1135,7 +1136,7 @@ func IsThisPortOpenIPV4(address string, port int) bool {
 	return true
 }
 
-func IsThisPortOpenIPV6(address string, port int) bool {
+func CheckOpenPortIPV6(address string, port int) bool {
 	if !FileExistsEasy("/proc") {
 		panic("runtime error: OS does not support proc")
 	}
@@ -1148,4 +1149,49 @@ func IsThisPortOpenIPV6(address string, port int) bool {
 	defer conn.Close()
 	// Port is open
 	return true
+}
+
+func CreateTempFile(size int64, sparse bool) (string, error) {
+	tmpFile, err := os.CreateTemp("/tmp", "tempfile-*")
+	if err != nil {
+		return "", err
+	}
+	defer tmpFile.Close()
+
+	if sparse {
+		if err := tmpFile.Truncate(size); err != nil {
+			return "", err
+		}
+	} else {
+		chunkSize := int64(4096) // 4KB chunks
+		randomData := make([]byte, chunkSize)
+		var written int64
+
+		for written < size {
+			if _, err := rand.Read(randomData); err != nil {
+				return "", err
+			}
+
+			remaining := size - written
+			if remaining < chunkSize {
+				chunkSize = remaining
+			}
+
+			if _, err := tmpFile.Write(randomData[:chunkSize]); err != nil {
+				return "", err
+			}
+
+			written += chunkSize
+
+			// Add sparse sections
+			if written < size {
+				if _, err := tmpFile.Seek(chunkSize, os.SEEK_CUR); err != nil {
+					return "", err
+				}
+				written += chunkSize
+			}
+		}
+	}
+
+	return filepath.Abs(tmpFile.Name())
 }

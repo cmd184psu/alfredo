@@ -43,14 +43,14 @@ func NewSQLiteDB() *DatabaseStruct {
 	db := &DatabaseStruct{}
 	db.exe = NewCLIExecutor()
 	db.exe.WithCaptureStdout(true).WithCaptureStderr(true).
-		WithCommand(sqlite_bin+ " "+ db.DbPath).
+		WithCommand(sqlite_bin + " " + db.DbPath).
 		WithTrimWhiteSpace(true)
 	return db
 }
 
 func (db *DatabaseStruct) WithDbPath(path string) *DatabaseStruct {
 	db.DbPath = path
-	db.exe.WithCommand(sqlite_bin +" "+ db.DbPath)
+	db.exe.WithCommand(sqlite_bin + " " + db.DbPath)
 	return db
 }
 
@@ -118,11 +118,11 @@ func (db *DatabaseStruct) DeletePayload(where string) string {
 		panic("DeletePayload: where clause should not contain WHERE")
 	}
 
-	var w string
 	if len(where) == 0 {
 		panic("unable to delete everything with this function; where was empty")
 	}
-	return fmt.Sprintf("DELETE FROM %s WHERE %s;\n", db.Table, w)
+	VerbosePrintf("DELETE FROM %s WHERE %s;\n", db.Table, where)
+	return fmt.Sprintf("DELETE FROM %s WHERE %s;\n", db.Table, where)
 }
 
 func (db *DatabaseStruct) Delete(where string) error {

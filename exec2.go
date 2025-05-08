@@ -14,21 +14,22 @@ import (
 )
 
 type CLIExecutor struct {
-	command        string
-	requestPayload string
-	sshHost        string
-	sshKey         string
-	sshUser        string
-	timeout        time.Duration
-	showSpinny     bool
-	captureStdout  bool
-	captureStderr  bool
-	statusCode     int
-	responseBody   string
-	trimWhiteSpace bool
-	directory      string
-	dump           bool
-	debugSSH       bool
+	command           string
+	requestPayload    string
+	sshHost           string
+	sshKey            string
+	sshUser           string
+	timeout           time.Duration
+	showSpinny        bool
+	captureStdout     bool
+	captureStderr     bool
+	statusCode        int
+	responseBody      string
+	trimWhiteSpace    bool
+	directory         string
+	dump              bool
+	debugSSH          bool
+	ignoreExitCodeOne bool
 }
 
 const default_timeout = 5 * time.Second
@@ -79,6 +80,14 @@ func (c *CLIExecutor) WithSSHDebug(b bool) *CLIExecutor {
 
 func (c *CLIExecutor) WithDirectory(directory string) *CLIExecutor {
 	c.directory = directory
+	return c
+}
+func (c *CLIExecutor) WithExitOneIsOK() *CLIExecutor {
+	c.ignoreExitCodeOne = true
+	return c
+}
+func (c *CLIExecutor) WithExitOneIsNotOK() *CLIExecutor {
+	c.ignoreExitCodeOne = false
 	return c
 }
 func (c *CLIExecutor) WithTimeout(timeout time.Duration) *CLIExecutor {
@@ -277,11 +286,19 @@ func (c *CLIExecutor) Execute() error {
 	//VerbosePrintf("Changed directory to %s (After env xfer)", EatErrorReturnString(os.Getwd()))
 
 	var stdoutBuf, stderrBuf bytes.Buffer
-	if c.captureStdout {
+	if c.captureStdout && !c.dump {
 		cmd.Stdout = &stdoutBuf
+	} else if c.dump && !c.captureStdout {
+		cmd.Stdout = os.Stdout
+	} else if c.dump && c.captureStdout {
+		cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
 	}
-	if c.captureStderr {
+	if c.captureStderr && !c.dump {
 		cmd.Stderr = &stderrBuf
+	} else if c.dump && !c.captureStderr {
+		cmd.Stderr = os.Stderr
+	} else if c.dump && c.captureStderr {
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -319,10 +336,23 @@ func (c *CLIExecutor) Execute() error {
 	// Wait for command completion or timeout
 	select {
 	case <-ctx.Done():
+		if c.ignoreExitCodeOne {
+			if cmd.ProcessState.ExitCode() == 1 {
+				c.WithStatusCode(0)
+				return nil
+			}
+		}
+
 		c.WithStatusCode(-1)
 		return ctx.Err()
 	case err := <-done:
 		if err != nil {
+
+			if c.ignoreExitCodeOne && cmd.ProcessState.ExitCode() == 1 {
+				c.WithStatusCode(0)
+				err = nil
+			}
+
 			// Capture output after command completion, even if there's an error
 			output := ""
 			if c.captureStdout {
@@ -352,10 +382,6 @@ func (c *CLIExecutor) Execute() error {
 	//fmt.Println("len of output is: ", len(c.GetResponseBody()))
 	//VerbosePrintf("wd is %s", EatErrorReturnString(os.Getwd()))
 	//VerbosePrintf("reverting back to  %s", cwd)
-
-	if c.dump {
-		fmt.Println(c.GetResponseBody())
-	}
 
 	//return os.Chdir(cwd)
 	return nil
@@ -396,7 +422,7 @@ func (c *CLIExecutor) CaptureJavaProcessList(jvm string) error {
 	c.WithCaptureStdout(true).WithCaptureStderr(true)
 	c.WithCommand("ps -eo pid,command").WithResponseBody("").WithTrimWhiteSpace(true).AsLongRunning()
 
-	fmt.Println("cli: ", c.GetCli())
+	//fmt.Println("cli: ", c.GetCli())
 
 	if err := c.Execute(); err != nil {
 		return err
@@ -449,4 +475,20 @@ func DiskDuplicatorArgs(device string, outputFile string, blockSize int64, count
 		seek = 0
 	}
 	return strings.Split(fmt.Sprintf("if=/dev/%s of=%s bs=%s seek=%d count=1", device, outputFile, DDHumanReadableStorageSize(blockSize), seek), " ")
+}
+
+// nc -zv 192.168.1.100 80 && echo "Port is open" || echo "Port is closed"
+func (c *CLIExecutor) IsThisPortOpenIPV4(ip string, port int) *CLIExecutor {
+	return c.WithCommand(fmt.Sprintf("nc -zv %s %d", ip, port)).WithExitOneIsOK().WithCaptureStdout(true).WithCaptureStderr(true).AsLongRunning()
+}
+
+func (c *CLIExecutor) IsPortOpen() bool {
+	if !c.ignoreExitCodeOne {
+		panic("coding mistake, should call IsThisPortOpenIPV4() first")
+	}
+	c.WithExitOneIsNotOK()
+	if c.statusCode == 0 && strings.Contains(c.GetResponseBody(), "Connected to") {
+		return true
+	}
+	return false
 }
