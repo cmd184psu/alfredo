@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -304,67 +303,74 @@ func (s SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) err
 
 func (s SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath string) error {
 	localFilePath = ExpandTilde(localFilePath)
-	var err error
-	var wg sync.WaitGroup
+	return GoFuncAndSpin(s.SecureDownload, localFilePath, remoteFilePath)
 
-	wg.Add(1)
-	sigChan := make(chan bool)
-	errorChan := make(chan error)
-	go func() {
-		defer wg.Done()
-		defer close(errorChan)
-		defer close(sigChan)
+	// var err error
+	// var wg sync.WaitGroup
 
-		e := s.SecureDownload(remoteFilePath, localFilePath)
-		sigChan <- true
-		errorChan <- e
-	}()
-	go Spinny(sigChan)
-	//errorRec = <-errorChan
-	err = <-errorChan
-	wg.Wait()
-	return err
+	// wg.Add(1)
+	// sigChan := make(chan bool)
+	// errorChan := make(chan error)
+	// go func() {
+	// 	defer wg.Done()
+	// 	defer close(errorChan)
+	// 	defer close(sigChan)
+
+	// 	e := s.SecureDownload(remoteFilePath, localFilePath)
+	// 	sigChan <- true
+	// 	errorChan <- e
+	// }()
+	// if !GetQuiet() {
+	// 	go Spinny(sigChan)
+	// }
+	// //errorRec = <-errorChan
+	// err = <-errorChan
+	// wg.Wait()
+	// return err
 }
 func (s SSHStruct) SecureUploadAndSpin(localFilePath string, remoteFilePath string) error {
 	localFilePath = ExpandTilde(localFilePath)
-	var err error
-	var wg sync.WaitGroup
+	return GoFuncAndSpin(s.SecureUpload, localFilePath, remoteFilePath)
+	// var err error
+	// var wg sync.WaitGroup
 
-	wg.Add(1)
-	sigChan := make(chan bool)
-	errorChan := make(chan error)
-	go func() {
-		defer wg.Done()
-		defer close(errorChan)
-		defer close(sigChan)
+	// wg.Add(1)
+	// sigChan := make(chan bool)
+	// errorChan := make(chan error)
+	// go func() {
+	// 	defer wg.Done()
+	// 	defer close(errorChan)
+	// 	defer close(sigChan)
 
-		e := s.SecureUpload(localFilePath, remoteFilePath)
-		sigChan <- true
-		errorChan <- e
-	}()
-	go Spinny(sigChan)
-	//errorRec = <-errorChan
-	err = <-errorChan
-	wg.Wait()
-	return err
+	// 	e := s.SecureUpload(localFilePath, remoteFilePath)
+	// 	sigChan <- true
+	// 	errorChan <- e
+	// }()
+	// if !GetQuiet() {
+	// 	go Spinny(sigChan)
+	// }
+	// //errorRec = <-errorChan
+	// err = <-errorChan
+	// wg.Wait()
+	// return err
 }
-func (this *SSHStruct) SetDefaults() {
+func (ssh *SSHStruct) SetDefaults() {
 	currentUser, err := user.Current()
 	if err != nil {
 		panic("Can't get current user")
 	}
-	if len(this.User) == 0 {
-		this.User = currentUser.Name
+	if len(ssh.User) == 0 {
+		ssh.User = currentUser.Name
 	}
-	if this.port == 0 {
-		this.port = 22
+	if ssh.port == 0 {
+		ssh.port = 22
 	}
-	if len(this.Key) == 0 {
-		this.Key = filepath.Join(currentUser.HomeDir + "/.ssh/id_rsa")
+	if len(ssh.Key) == 0 {
+		ssh.Key = filepath.Join(currentUser.HomeDir + "/.ssh/id_rsa")
 	}
-	if this.capture {
-		this.stdout = ""
-		this.stderr = ""
+	if ssh.capture {
+		ssh.stdout = ""
+		ssh.stderr = ""
 	}
 }
 
@@ -522,28 +528,31 @@ func (s SSHStruct) GetRemoteHostname() (string, error) {
 }
 
 func (s *SSHStruct) RemoteExecuteAndSpin(cli string) error {
-	var err error
-	var wg sync.WaitGroup
+	return GoFuncAndSpin(s.SecureRemoteExecution, cli)
+	// var err error
+	// var wg sync.WaitGroup
 
-	wg.Add(1)
-	sigChan := make(chan bool)
-	errorChan := make(chan error)
-	go func() {
-		defer wg.Done()
-		defer close(errorChan)
-		defer close(sigChan)
-		var e error
-		s.capture = false
-		s.silent = true
-		e = s.SecureRemoteExecution(cli)
-		sigChan <- true
-		errorChan <- e
-	}()
-	go Spinny(sigChan)
-	//errorRec = <-errorChan
-	err = <-errorChan
-	wg.Wait()
-	return err
+	// wg.Add(1)
+	// sigChan := make(chan bool)
+	// errorChan := make(chan error)
+	// go func() {
+	// 	defer wg.Done()
+	// 	defer close(errorChan)
+	// 	defer close(sigChan)
+	// 	var e error
+	// 	s.capture = false
+	// 	s.silent = true
+	// 	e = s.SecureRemoteExecution(cli)
+	// 	sigChan <- true
+	// 	errorChan <- e
+	// }()
+	// if !GetQuiet() {
+	// 	go Spinny(sigChan)
+	// }
+	// //errorRec = <-errorChan
+	// err = <-errorChan
+	// wg.Wait()
+	// return err
 }
 
 // local, remote

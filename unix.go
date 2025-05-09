@@ -15,7 +15,6 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -680,30 +679,33 @@ func Spinny(sigChan chan bool) {
 	fmt.Printf(" \b")
 }
 
-func System3AndSpin(cmd string, redirect string) (err error) {
-	if GetDryRun() {
-		fmt.Printf("DRYRUN: %s > %s\n", cmd, redirect)
-		return nil
-	}
-	//var errorRec error
-	var wg sync.WaitGroup
-	wg.Add(1)
-	//messages := make(chan string)
-	sigChan := make(chan bool)
-	errorChan := make(chan error)
-	go func() {
-		defer wg.Done()
-		defer close(errorChan)
-		defer close(sigChan)
-		e := ExecToFile(cmd, redirect)
-		sigChan <- true
-		errorChan <- e
-	}()
-	go Spinny(sigChan)
-	//errorRec = <-errorChan
-	err = <-errorChan
-	wg.Wait()
-	return err
+func ExecToFileAndSpin(cmd string, redirect string) (err error) {
+	return GoFuncAndSpin(ExecToFile, cmd, redirect)
+	// if GetDryRun() {
+	// 	fmt.Printf("DRYRUN: %s > %s\n", cmd, redirect)
+	// 	return nil
+	// }
+	// //var errorRec error
+	// var wg sync.WaitGroup
+	// wg.Add(1)
+	// //messages := make(chan string)
+	// sigChan := make(chan bool)
+	// errorChan := make(chan error)
+	// go func() {
+	// 	defer wg.Done()
+	// 	defer close(errorChan)
+	// 	defer close(sigChan)
+	// 	e := ExecToFile(cmd, redirect)
+	// 	sigChan <- true
+	// 	errorChan <- e
+	// }()
+	// if !GetQuiet() {
+	// 	go Spinny(sigChan)
+	// }
+	// //errorRec = <-errorChan
+	// err = <-errorChan
+	// wg.Wait()
+	// return err
 }
 
 func Error2ExitCode(err error) int {

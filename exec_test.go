@@ -250,6 +250,7 @@ func TestGoFuncAndSpin(t *testing.T) {
 		name    string
 		args    args
 		wantErr bool
+		quiet   bool
 	}{
 		{
 			name: "Test with funkySleep (err)",
@@ -257,6 +258,15 @@ func TestGoFuncAndSpin(t *testing.T) {
 				cb:     funkySleepErr,
 				params: []interface{}{},
 			},
+			wantErr: true,
+		},
+		{
+			name: "Test with funkySleep (quiet mode)",
+			args: args{
+				cb:     funkySleepErr,
+				params: []interface{}{},
+			},
+			quiet:   true,
 			wantErr: true,
 		},
 		{
@@ -270,6 +280,8 @@ func TestGoFuncAndSpin(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			SetQuiet(tt.quiet)
+
 			if err := GoFuncAndSpin(tt.args.cb, tt.args.params...); (err != nil) != tt.wantErr {
 				t.Errorf("GoFuncAndSpin() error = %v, wantErr %v", err, tt.wantErr)
 			}

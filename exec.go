@@ -218,10 +218,10 @@ func (ex *ExecStruct) Execute() error {
 		panic("missing exec call back function; ssh not configured")
 	}
 	if ex.spinny && ex.progressExecFunc != nil {
-		ex.SpinSigChan = make(chan bool)
+		ex.SpinSigChan = make(chan bool, 1)
 	}
 	if ex.OkToWatch() {
-		ex.WatchSigChan = make(chan bool)
+		ex.WatchSigChan = make(chan bool, 1)
 	}
 	ex.ErrChan = make(chan error)
 	wg.Add(1)
@@ -467,10 +467,10 @@ func (ex *ExecStruct) ExecuteOLD() error {
 	}
 
 	if ex.spinny && ex.progressExecFunc != nil {
-		ex.SpinSigChan = make(chan bool)
+		ex.SpinSigChan = make(chan bool, 1)
 	}
 	if ex.OkToWatch() {
-		ex.WatchSigChan = make(chan bool)
+		ex.WatchSigChan = make(chan bool, 1)
 	}
 	ex.ErrChan = make(chan error)
 	wg.Add(1)
@@ -509,7 +509,7 @@ func (ex *ExecStruct) ExecuteOLD() error {
 		// }
 		ex.ErrChan <- e
 	}()
-	if ex.OkToSpin() {
+	if ex.OkToSpin() && !GetQuiet() {
 		go ex.progressExecFunc(ex.SpinSigChan)
 	}
 	//wg.Add(1)
@@ -524,30 +524,33 @@ func (ex *ExecStruct) ExecuteOLD() error {
 }
 
 func LocalExecuteAndSpin(cli string) error {
-	if GetDryRun() {
-		fmt.Println("DRYRUN: ", cli)
-		return nil
-	}
-	var err error
-	var wg sync.WaitGroup
+	return GoFuncAndSpin(System3toCapturedString, cli)
+	// if GetDryRun() {
+	// 	fmt.Println("DRYRUN: ", cli)
+	// 	return nil
+	// }
+	// var err error
+	// var wg sync.WaitGroup
 
-	wg.Add(1)
-	sigChan := make(chan bool)
-	errorChan := make(chan error)
-	go func() {
-		defer wg.Done()
-		defer close(errorChan)
-		defer close(sigChan)
+	// wg.Add(1)
+	// sigChan := make(chan bool)
+	// errorChan := make(chan error)
+	// go func() {
+	// 	defer wg.Done()
+	// 	defer close(errorChan)
+	// 	defer close(sigChan)
 
-		e := System3(cli)
-		sigChan <- true
-		errorChan <- e
-	}()
-	go Spinny(sigChan)
-	//errorRec = <-errorChan
-	err = <-errorChan
-	wg.Wait()
-	return err
+	// 	e := System3(cli)
+	// 	sigChan <- true
+	// 	errorChan <- e
+	// }()
+	// if !GetQuiet() {
+	// 	go Spinny(sigChan)
+	// }
+	// //errorRec = <-errorChan
+	// err = <-errorChan
+	// wg.Wait()
+	// return err
 }
 
 func RunToLess(cmd1 *exec.Cmd) error {
@@ -605,8 +608,8 @@ func GoFuncAndSpin(cb interface{}, params ...interface{}) error {
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	sigChan := make(chan bool)
-	errorChan := make(chan error)
+	sigChan := make(chan bool, 1)
+	errorChan := make(chan error, 1)
 	go func() {
 		defer wg.Done()
 		defer close(errorChan)

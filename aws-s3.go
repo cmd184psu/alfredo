@@ -68,6 +68,14 @@ type S3ClientSession struct {
 	enforceCertificates bool
 }
 
+type S3Objects struct {
+	Object       string    `json:"object"`
+	Size         int64     `json:"size"`
+	Etag         string    `json:"etag"`
+	Owner        string    `json:"owner"`
+	LastModified time.Time `json:"lastModified"`
+}
+
 // deep copy with a clean new session
 func (s3c *S3ClientSession) DeepCopy() S3ClientSession {
 	var retValue S3ClientSession
@@ -468,25 +476,37 @@ func (this S3ClientSession) SyncInner(trimsz int, localPath string) error {
 	return nil
 }
 
-func (s3c S3ClientSession) ListObjectsWithPrefix(prefix string) ([]string, error) {
-	VerbosePrintf("BEGIN: ListObjectsWithPrefix(%s)", prefix)
+func (s3c S3ClientSession) ListObjectsWithSizeFilter(bucket string, sizeFilter int64) ([]S3Objects, error) {
 	// List all objects in the bucket.
 	VerbosePrintln("bucket=" + s3c.Bucket)
-
-	resp, err := s3c.Client.ListObjectsV2(&s3.ListObjectsV2Input{
+	var err error
+	listObjectsInput := &s3.ListObjectsV2Input{
 		Bucket: aws.String(s3c.Bucket),
-		Prefix: aws.String(prefix),
+	}
+	//s3list:=[]S3Objects{}
+	var s3list []S3Objects
+	VerbosePrintln("About to listobjectvPages()")
+	err = s3c.Client.ListObjectsV2Pages(listObjectsInput, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		if page == nil {
+			panic("page is nil")
+		}
+		VerbosePrintln("inside ListObjectsV2Pages")
+		VerbosePrintln(fmt.Sprintf("len(page.Content)=%d", len(page.Contents)))
+		for _, obj := range page.Contents {
+			if obj != nil {
+				if sizeFilter == 0 || (sizeFilter > 0 && *obj.Size < sizeFilter) {
+					s3list = append(s3list, S3Objects{Object: *obj.Key, Size: *obj.Size, LastModified: *obj.LastModified, Etag: *obj.ETag})
+				}
+			} else {
+				VerbosePrintln("obj is nil")
+			}
+		}
+		return !lastPage
 	})
-
-	var results []string
 	if err != nil {
-		return results, err
+		panic(err.Error())
 	}
-	for _, item := range resp.Contents {
-		results = append(results, *item.Key)
-	}
-	VerbosePrintf("BEGIN: ListObjectsWithPrefix(%s)", prefix)
-	return results, nil
+	return s3list, err
 }
 
 func (s3c S3ClientSession) RecursiveBucketDelete() error {
@@ -942,7 +962,7 @@ func S3HelperScriptBuiltInCredsCreateBucket(region string, endpoint string, ak s
 	return strings.Join(scriptLine, "\n")
 }
 
-func (s3c S3ClientSession) IsVersioningEnabled() error {
+func (s3c *S3ClientSession) IsVersioningEnabled() error {
 	if len(s3c.Bucket) == 0 {
 		panic("aws-s3.go::IsVersioningEnabled():: bucket is not set")
 	}
@@ -975,15 +995,16 @@ func (s3c S3ClientSession) IsVersioningEnabled() error {
 	// VerbosePrintln("endpoint = " + s3s.Endpoint)
 	// s3s.Client.Endpoint = s3s.Endpoint
 	result, err := svc.GetBucketVersioning(input)
-
 	if err != nil {
 		panic(err.Error())
 	}
 
 	// Check if versioning is enabled
-
-	VerbosePrintf("Versioning status=%q", aws.StringValue(result.Status))
-	s3c.Versioning = strings.EqualFold(aws.StringValue(result.Status), "Enabled")
+	if result.Status == nil {
+		s3c.Versioning = false
+		return nil
+	}
+	s3c.Versioning = strings.EqualFold(*result.Status, "Enabled")
 	return nil
 }
 
@@ -2012,4 +2033,16 @@ func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration,
 	VerbosePrintln("\n\n\nEND::s3.createbuckethw()")
 
 	return nil
+}
+
+func S3ObjectListToMap(s3ObjectList []S3Objects) map[string]string {
+	s3ObjectMap := make(map[string]string)
+	for _, s3Object := range s3ObjectList {
+		s3ObjectMap[s3Object.Object] = fmt.Sprintf("owner: %s, key: %s, size: %d", s3Object.Owner, s3Object.Object, s3Object.Size)
+	}
+	return s3ObjectMap
+}
+
+func CompareS3ObjectLists(mapA, mapB []S3Objects) []string {
+	return CompareMaps(S3ObjectListToMap(mapA), S3ObjectListToMap(mapB))
 }
