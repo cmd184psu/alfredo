@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -400,9 +401,7 @@ func (c *CLIExecutor) HashFile(fileName string) string {
 	if len(fileName) == 0 {
 		return ""
 	}
-	//does not make sense!
-
-	c.WithCommand("md5sum " + fileName).WithCaptureStdout(true).WithCaptureStderr(true)
+	c.WithCommand("md5sum " + fileName).WithCaptureStdout(true).WithCaptureStderr(true).AsLongRunning()
 
 	if err := c.Execute(); err != nil {
 		panic("Error: " + err.Error())
@@ -491,4 +490,75 @@ func (c *CLIExecutor) IsPortOpen() bool {
 		return true
 	}
 	return false
+}
+
+func (c *CLIExecutor) NormalizeName(fuzzy string) error {
+	if len(fuzzy) == 0 {
+		c.responseBody = ""
+		return nil
+	}
+	if !strings.Contains(fuzzy, "*") {
+		c.responseBody = fuzzy
+		return nil
+	}
+
+	if filepath.IsAbs(fuzzy) {
+		c.WithDirectory(filepath.Dir(fuzzy))
+		fuzzy = filepath.Base(fuzzy)
+	}
+
+	// If running over SSH, use 'find' to get matching files and their mtimes, then pick the newest.
+	// Otherwise, walk the local filesystem and do the same.
+	if len(c.sshHost) > 0 {
+		// Use find to list files matching the pattern and their mtimes, sort by mtime descending, pick the first.
+
+		findCmd := fmt.Sprintf(`find . -maxdepth 1 -type f -name %q -printf "%%T@ %%p\n" | sort -nr | head -n1 | awk '{print $2}'`, fuzzy)
+
+		c.WithCommand(findCmd).WithCaptureStdout(true).WithCaptureStderr(true).AsLongRunning()
+
+		//fmt.Println("cli: ", c.GetCli())
+
+		if err := c.Execute(); err != nil {
+			return err
+		}
+	} else {
+
+		// Local version: walk the directory, match pattern, pick newest
+		dir := c.directory
+		if dir == "" {
+			dir = "."
+		}
+		matches, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		var newestFile string
+		var newestModTime time.Time
+		for _, entry := range matches {
+			if entry.IsDir() {
+				continue
+			}
+			matched, _ := filepath.Match(fuzzy, entry.Name())
+			if matched {
+				info, err := entry.Info()
+				if err != nil {
+					continue
+				}
+				if info.ModTime().After(newestModTime) {
+					newestModTime = info.ModTime()
+					newestFile = entry.Name()
+				}
+			}
+		}
+		c.responseBody = newestFile
+
+	}
+
+	result := strings.TrimSpace(c.GetResponseBody())
+	result = strings.TrimPrefix(result, "./")
+	if len(c.directory) > 0 && len(strings.TrimSpace(result)) != 0 {
+		result = filepath.Join(c.directory, result)
+	}
+	c.responseBody = result
+	return nil
 }
