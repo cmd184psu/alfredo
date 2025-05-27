@@ -1081,6 +1081,19 @@ func (s *SSHStruct) GetLastModifiedTime(remoteFile string) (time.Time, error) {
 	return time.Unix(epochSeconds, 0), nil
 }
 
+func (s *SSHStruct) GetRemoteFileSize(remoteFile string) (int64, error) {
+	// Execute the command to get the file size in bytes
+	if err := s.SecureRemoteExecution(fmt.Sprintf("stat -c %%s %s", remoteFile)); err != nil {
+		return 0, err
+	}
+	sizeStr := strings.TrimSpace(s.GetBody())
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
+}
+
 func (s *SSHStruct) SyncFileWithRemote(localFile string, remoteFile string, hashValidation bool, createDirectories bool) error {
 	// Check if the SSH connection is configured
 	localFile = ExpandTilde(localFile)

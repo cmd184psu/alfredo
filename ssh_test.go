@@ -712,3 +712,72 @@ func TestSSHStruct_RemoteFileCount(t *testing.T) {
 		})
 	}
 }
+
+func TestSSHStruct_GetRemoteFileSize(t *testing.T) {
+	tmpDir := os.TempDir()
+	testFile := tmpDir + "/testfile_size.txt"
+	testContent := []byte("this is a test file for size check\nwith multiple lines\n")
+	if err := os.WriteFile(testFile, testContent, 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	defer os.Remove(testFile)
+
+	// Get local file size for comparison
+	stat, err := os.Stat(testFile)
+	if err != nil {
+		t.Fatalf("failed to stat test file: %v", err)
+	}
+	localSize := stat.Size()
+
+	// Prepare SSHStruct for localhost
+	ssh := &SSHStruct{
+		Key:  ExpandTilde("~/.ssh/homelab_rsa"),
+		User: os.Getenv("USER"),
+		Host: "localhost",
+		port: 22,
+	}
+
+	// Simulate remote command output by setting stdout to the file size as string
+	// In a real scenario, you would run a remote command like "stat -c %s <file>"
+	// Here, we simulate as if the remote command has been run and output captured
+	ssh.stdout = fmt.Sprintf("%d", localSize)
+
+	tests := []struct {
+		name       string
+		remoteFile string
+		want       int64
+		wantErr    bool
+	}{
+		{
+			name:       "existing file, correct size",
+			remoteFile: testFile,
+			want:       localSize,
+			wantErr:    false,
+		},
+		{
+			name:       "non-existent file",
+			remoteFile: tmpDir + "/does_not_exist.txt",
+			want:       0,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			switch tt.name {
+			case "existing file, correct size":
+				ssh.stdout = fmt.Sprintf("%d", localSize)
+			case "non-existent file":
+				ssh.stdout = "no such file"
+			}
+			got, err := ssh.GetRemoteFileSize(tt.remoteFile)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SSHStruct.GetRemoteFileSize() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("SSHStruct.GetRemoteFileSize() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
