@@ -10,6 +10,7 @@ var GitRevision string
 var GitBranch string
 var GitVersion string
 var GitTimestamp string
+var GitProduction string
 
 func buildVersion(gitbranch string, gitversion string, gittimestamp string, mainbranch string) string {
 	GitBranch = TrimQuotes(gitbranch)
@@ -21,7 +22,8 @@ func buildVersion(gitbranch string, gitversion string, gittimestamp string, main
 
 	var gb string
 	//fmt.Printf("Comparing %q vs %q\n", GitBranch, mainbranch)
-	if strings.EqualFold(GitBranch, mainbranch) {
+	VerbosePrintln("production = " + GitProduction)
+	if strings.EqualFold(GitBranch, mainbranch) || !strings.EqualFold(GitProduction, "") {
 		gb = ""
 	} else {
 		gb = "-" + GitBranch

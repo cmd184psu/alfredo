@@ -3,6 +3,7 @@ package alfredo
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -357,6 +358,61 @@ func TestWriteStringToFile(t *testing.T) {
 				}
 				// Clean up
 				os.Remove(tt.args.filename)
+			}
+		})
+	}
+}
+
+func TestGetTopLevelDir(t *testing.T) {
+	// Save current working directory to restore later
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
+	defer os.Chdir(origDir)
+
+	// Create a temporary directory structure
+	tmpDir, err := os.MkdirTemp("", "topdirtest")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	subDir := tmpDir + "/subdir"
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("Failed to create subdir: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		chdir    string
+		expected string
+	}{
+		{
+			name:     "Top level temp dir",
+			chdir:    tmpDir,
+			expected: filepath.Base(tmpDir),
+		},
+		{
+			name:     "Subdirectory",
+			chdir:    subDir,
+			expected: "subdir",
+		},
+		{
+			name:     "Root directory",
+			chdir:    "/",
+			expected: "/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.Chdir(tt.chdir); err != nil {
+				t.Fatalf("Failed to chdir to %s: %v", tt.chdir, err)
+			}
+			got := GetTopLevelDir()
+			if got != tt.expected {
+				t.Errorf("GetTopLevelDir() = %q, want %q", got, tt.expected)
 			}
 		})
 	}

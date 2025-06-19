@@ -1217,3 +1217,7 @@ func IsIPAddress(s string) bool {
 	}
 	return true
 }
+
+func GetTopLevelDir() string {
+	return filepath.Base(EatErrorReturnString(os.Getwd()))
+}

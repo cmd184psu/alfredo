@@ -969,6 +969,10 @@ func (s3c *S3ClientSession) IsVersioningEnabled() error {
 	if len(s3c.Endpoint) == 0 {
 		panic("aws-s3.go::IsVersioningEnabled():: endpoint is not set")
 	}
+	if len(os.Getenv("SIMULATE_S3_ERROR")) > 0 {
+		return fmt.Errorf("simulated S3 error")
+	}
+
 	if err := s3c.EstablishSession(); err != nil {
 		panic(err.Error())
 	}
@@ -2045,4 +2049,184 @@ func S3ObjectListToMap(s3ObjectList []S3Objects) map[string]string {
 
 func CompareS3ObjectLists(mapA, mapB []S3Objects) []string {
 	return CompareMaps(S3ObjectListToMap(mapA), S3ObjectListToMap(mapB))
+}
+
+// BucketSummary holds the summary statistics
+type BucketSummary struct {
+	TotalObjects int64
+	TotalSize    int64
+}
+
+// GetBucketSummary retrieves total object count and size for an S3 bucket
+func (s3c *S3ClientSession) GetBucketSummary(prefix string) (BucketSummary, error) {
+	if len(os.Getenv("SIMULATE_S3_ERROR")) > 0 {
+		return BucketSummary{}, fmt.Errorf("simulated S3 error")
+	}
+	summary := BucketSummary{}
+
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(s3c.Bucket),
+	}
+
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
+	}
+
+	err := s3c.Client.ListObjectsV2Pages(input, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		if page.Contents != nil {
+			for _, obj := range page.Contents {
+				summary.TotalObjects++
+				if obj.Size != nil {
+					summary.TotalSize += *obj.Size
+				}
+			}
+		}
+		return !lastPage // Continue pagination
+	})
+
+	if err != nil {
+		return summary, fmt.Errorf("failed to list objects: %w", err)
+	}
+
+	return summary, nil
+}
+
+// GetBucketSummaryWithVersions retrieves summary including all object versions
+func (s3c *S3ClientSession) GetBucketSummaryWithVersions(prefix string) (BucketSummary, error) {
+	summary := BucketSummary{}
+
+	input := &s3.ListObjectVersionsInput{
+		Bucket: aws.String(s3c.Bucket),
+	}
+
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
+	}
+
+	err := s3c.Client.ListObjectVersionsPages(input, func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
+		// Count actual object versions
+		if page.Versions != nil {
+			for _, version := range page.Versions {
+				summary.TotalObjects++
+				if version.Size != nil {
+					summary.TotalSize += *version.Size
+				}
+			}
+		}
+
+		// Count delete markers (they don't have size but are objects)
+		if page.DeleteMarkers != nil {
+			for range page.DeleteMarkers {
+				summary.TotalObjects++
+				// Delete markers have no size
+			}
+		}
+
+		return !lastPage // Continue pagination
+	})
+
+	if err != nil {
+		return summary, fmt.Errorf("failed to list object versions: %w", err)
+	}
+
+	return summary, nil
+}
+
+// FormatBytes converts bytes to human-readable format matching AWS CLI
+func FormatBytes(bytes int64) string {
+	if bytes == 0 {
+		return "0 Bytes"
+	}
+
+	units := []string{"Bytes", "KiB", "MiB", "GiB", "TiB", "PiB"}
+	base := 1024.0
+
+	if bytes < int64(base) {
+		return fmt.Sprintf("%d %s", bytes, units[0])
+	}
+
+	exp := int(math.Log(float64(bytes)) / math.Log(base))
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+
+	value := float64(bytes) / math.Pow(base, float64(exp))
+	return fmt.Sprintf("%.1f %s", value, units[exp])
+}
+
+// PrintBucketSummary prints the summary in AWS CLI format
+func (s3c *S3ClientSession) PrintBucketSummary(prefix string, includeVersions bool) error {
+	var summary BucketSummary
+	var err error
+
+	if includeVersions {
+		summary, err = s3c.GetBucketSummaryWithVersions(prefix)
+	} else {
+		summary, err = s3c.GetBucketSummary(prefix)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Total Objects: %d\n", summary.TotalObjects)
+	fmt.Printf("Total Size: %s\n", FormatBytes(summary.TotalSize))
+
+	return nil
+}
+
+// Example usage
+// func main() {
+// 	// Create AWS session
+// 	sess, err := session.NewSession(&aws.Config{
+// 		Region: aws.String("us-east-1"), // Change to your region
+// 	})
+// 	if err != nil {
+// 		log.Fatalf("Failed to create session: %v", err)
+// 	}
+
+// 	// Create S3 service client
+// 	svc := s3.New(sess)
+
+// 	// Example usage - replace with your bucket name
+// 	bucketName := "your-bucket-name"
+// 	prefix := "" // Optional: set to filter by prefix
+// 	includeVersions := false // Set to true to include all versions
+
+// 	err = PrintBucketSummary(svc, bucketName, prefix, includeVersions)
+// 	if err != nil {
+// 		log.Fatalf("Error getting bucket summary: %v", err)
+// 	}
+// }
+
+// Alternative: If you already have pagination logic, here's a simple counter approach
+func CountObjectsAndSize(objects []*s3.Object) (int64, int64) {
+	var totalObjects, totalSize int64
+
+	for _, obj := range objects {
+		totalObjects++
+		if obj.Size != nil {
+			totalSize += *obj.Size
+		}
+	}
+
+	return totalObjects, totalSize
+}
+
+// For object versions
+func CountVersionsAndSize(versions []*s3.ObjectVersion, deleteMarkers []*s3.DeleteMarkerEntry) (int64, int64) {
+	var totalObjects, totalSize int64
+
+	// Count versions
+	for _, version := range versions {
+		totalObjects++
+		if version.Size != nil {
+			totalSize += *version.Size
+		}
+	}
+
+	// Count delete markers (no size)
+	totalObjects += int64(len(deleteMarkers))
+
+	return totalObjects, totalSize
 }
