@@ -51,18 +51,18 @@ func GetCCTypeOf(cc string) CrossCopyModeType {
 }
 
 type SSHStruct struct {
-	Key            string `json:"key"`
-	User           string `json:"user"`
-	Host           string `json:"host"`
+	Key            string `json:"key,omitempty"` //ssh key file, if empty, use ~/.ssh/id_rsa
+	User           string `json:"user,omitempty"` //ssh user, if empty, use $USER
+	Host           string `json:"host,omitempty"`
 	capture        bool
 	stdout         string
 	stderr         string
 	port           int
-	RemoteDir      string `json:"remotedir"`
+	RemoteDir      string `json:"remotedir,omitempty"` //remote directory to execute commands in, if empty, use home dir
 	silent         bool
 	exitCode       int
 	ccmode         CrossCopyModeType
-	ConnectTimeout int `json:"connecttimeout"` //ssh -o ConnectTimeout=10
+	ConnectTimeout int `json:"connecttimeout,omitempty"` //ssh -o ConnectTimeout=10
 	request        string
 	//parentExe      *ExecStruct
 }
