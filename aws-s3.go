@@ -2042,7 +2042,9 @@ func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration,
 func S3ObjectListToMap(s3ObjectList []S3Objects) map[string]string {
 	s3ObjectMap := make(map[string]string)
 	for _, s3Object := range s3ObjectList {
-		s3ObjectMap[s3Object.Object] = fmt.Sprintf("owner: %s, key: %s, size: %d", s3Object.Owner, s3Object.Object, s3Object.Size)
+		if !strings.HasSuffix(s3Object.Object, "/") {
+			s3ObjectMap[s3Object.Object] = fmt.Sprintf("owner: %s, key: %s, size: %d", s3Object.Owner, s3Object.Object, s3Object.Size)
+		}
 	}
 	return s3ObjectMap
 }
