@@ -12,13 +12,16 @@ var GitVersion string
 var GitTimestamp string
 var GitProduction string
 
-func buildVersion(gitbranch string, gitversion string, gittimestamp string, mainbranch string) string {
+func buildVersion(gitbranch string, gitversion string, gittimestamp string, mainbranch string, production bool) string {
 	GitBranch = TrimQuotes(gitbranch)
 	GitVersion = TrimQuotes(gitversion)
 	GitTimestamp = TrimQuotes(gittimestamp)
+	GitProduction = fmt.Sprintf("%t", production)
+
 	VerbosePrintln("gitbranch=" + GitBranch)
 	VerbosePrintln("ver=" + GitVersion)
 	VerbosePrintln("time=" + GitTimestamp)
+	VerbosePrintf("prod=%s", GitProduction)
 
 	var gb string
 	//fmt.Printf("Comparing %q vs %q\n", GitBranch, mainbranch)
@@ -33,9 +36,9 @@ func buildVersion(gitbranch string, gitversion string, gittimestamp string, main
 }
 
 func BuildVersion() string {
-	return buildVersion(GitBranch, GitVersion, GitTimestamp, "main")
+	return buildVersion(GitBranch, GitVersion, GitTimestamp, "main", true)
 }
 
 func BuildVersionWithMainBranch(mainbranch string) string {
-	return buildVersion(GitBranch, GitVersion, GitTimestamp, mainbranch)
+	return buildVersion(GitBranch, GitVersion, GitTimestamp, mainbranch, strings.EqualFold(strings.ToLower(GitProduction), "true"))
 }
