@@ -408,11 +408,11 @@ func (has HttpApiStruct) BuildCurlCLI(method string, uri string) string {
 }
 
 func (has *HttpApiStruct) httpApiCallLocal(method string, uri string) error {
-	VerbosePrintf("BEGIN httpApiCallLocal(%s,%s)", method, uri)
+	//VerbosePrintf("BEGIN httpApiCallLocal(%s,%s)", method, uri)
 	if len(has.Fqdn) == 0 {
 		return errors.New("missing ip address for api call")
 	}
-
+	VerbosePrintf("httpApiCallLocal::total headers: %d", len(has.Headers))
 	for h := range has.Headers {
 		if strings.EqualFold(h, HEADER_AUTHORIZATION) {
 			VerbosePrintf("Authorization header === %s\n", has.Headers[h])
@@ -420,8 +420,8 @@ func (has *HttpApiStruct) httpApiCallLocal(method string, uri string) error {
 		}
 	}
 
-	VerbosePrintf("\t\thttpApiCallLocal:::: uri=%q", uri)
-	VerbosePrintf("\t\thttpApiCallLocal:::: FixURI(uri)=%q", FixURI(uri))
+	//	VerbosePrintf("\t\thttpApiCallLocal:::: uri=%q", uri)
+	//	VerbosePrintf("\t\thttpApiCallLocal:::: FixURI(uri)=%q", FixURI(uri))
 	apiURL := has.getBaseURL() + FixURI(uri)
 	//HTTP client capable of ignoring self-signed certificate
 	tr := &http.Transport{
@@ -613,7 +613,7 @@ func FixURI(u string) string {
 		queryList[i] = fixedPair
 	}
 	VerbosePrintln("END FixURI()")
-	return strings.ReplaceAll(fmt.Sprintf("%s?%s", urisplits[0], strings.Join(queryList, "&")), "%40", "@")
+	return strings.ReplaceAll(strings.ReplaceAll(fmt.Sprintf("%s?%s", urisplits[0], strings.Join(queryList, "&")), "%40", "@"), ":", "%3A")
 }
 
 func (has *HttpApiStruct) adjustHeaders() {
@@ -631,7 +631,7 @@ func (has *HttpApiStruct) adjustHeaders() {
 }
 
 func (has *HttpApiStruct) HttpApiCall(method string, uri string) error {
-	VerbosePrintf("BEGIN HttpApiStruct::HttpApiCall(%s,%s)", method, uri)
+	//	VerbosePrintf("BEGIN HttpApiStruct::HttpApiCall(%s,%s)", method, uri)
 	if len(has.Fqdn) == 0 {
 		return fmt.Errorf("missing fqdn / ip address")
 	}
@@ -643,7 +643,7 @@ func (has *HttpApiStruct) HttpApiCall(method string, uri string) error {
 		}
 		return has.httpApiCallRemote(method, uri)
 	}
-	VerbosePrintf("END HttpApiStruct::HttpApiCall(%s,%s) - hand over to HttpApiCallLocal", method, uri)
+	//	VerbosePrintf("END HttpApiStruct::HttpApiCall(%s,%s) - hand over to HttpApiCallLocal", method, uri)
 	return has.httpApiCallLocal(method, uri)
 }
 
@@ -670,6 +670,18 @@ func (has *HttpApiStruct) AcquireTokenFromPasscode(passcode string) error {
 	if len(has.Fqdn) == 0 {
 		return fmt.Errorf("missing ip address / fqdn")
 	}
+	if len(passcode) == 0 {
+		return fmt.Errorf("missing passcode")
+	}
+	if len(has.token) > 0 {
+		expired, err := IsTokenExpired(has.token)
+
+		if !expired && err == nil {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("error checking token expiration: %v", err)
+		}
+	}
 
 	// if len(has.ssh.Host) == 0 {
 	// 	return errors.New("ssh is not enabled for this HttpApiStruct")
@@ -690,6 +702,8 @@ func (has *HttpApiStruct) AcquireTokenFromPasscode(passcode string) error {
 	json.Unmarshal(has.GetResponseBody(), &pct)
 
 	has.token = pct.Token
+
+	has.Passcode = passcode
 
 	return nil
 }
@@ -720,6 +734,25 @@ func (has *HttpApiStruct) ParseFromURL(urlStr string) (string, error) {
 	return parsedURL.RequestURI(), nil
 }
 
-func (has *HttpApiStruct) GetToken() string {
+func (has HttpApiStruct) GetToken() string {
 	return has.token
+}
+func (has *HttpApiStruct) SetToken(t string) {
+	has.token = t
+}
+
+func (has HttpApiStruct) GetPasscode() string {
+	if len(has.Passcode) > 0 {
+		return has.Passcode
+	}
+	return ""
+}
+
+func (has *HttpApiStruct) SetPasscode(passcode string) *HttpApiStruct {
+	if len(passcode) > 0 {
+		has.Passcode = passcode
+	} else {
+		has.Passcode = ""
+	}
+	return has
 }
