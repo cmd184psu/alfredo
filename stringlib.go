@@ -627,6 +627,28 @@ func EatErrorReturnString(s string, e error) string {
 	}
 	panic(e)
 }
+func EatErrorAndReturnInt(i int, e error, retOnError int) int {
+	if e == nil {
+		return i
+	}
+	return retOnError
+}
+
+func Atoi(s string, retOnError int) int {
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		return retOnError
+	}
+	return i
+}
+func Atoi64(s string, retOnError int64) int64 {
+	i, err := strconv.ParseInt(s,10,64)
+	if err != nil {
+		return retOnError
+	}
+	return i
+}
+
 
 func DeepCopyStringToPointer(s string) *string {
 	// Create a new string with the same value

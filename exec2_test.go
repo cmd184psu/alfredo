@@ -566,7 +566,7 @@ func TestCLIExecutor_CaptureJavaProcessList(t *testing.T) {
 				t.Errorf("CLIExecutor.CaptureJavaProcessList() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			c.GetProcListFromResponseBody()
-			if len(c.GetResponseBody()) == 0 || strings.Contains(c.GetResponseBody(),"null") {
+			if len(c.GetResponseBody()) == 0 || strings.Contains(c.GetResponseBody(), "null") {
 				t.Errorf("No Java processes found")
 			}
 			fmt.Println("Captured Java processes: ", c.GetResponseBody())
@@ -580,6 +580,243 @@ func TestCLIExecutor_CaptureJavaProcessList(t *testing.T) {
 				t.Errorf("No Java processes found")
 			}
 			fmt.Println("Exit code: ", c.GetStatusCode())
+		})
+	}
+}
+
+func TestCLIExecutor_NormalizeName(t *testing.T) {
+	// Prepare test files in a temp directory
+	tmpDir := "/tmp/alfredo_test"
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	//defer os.RemoveAll(tmpDir) // Clean up after the test
+	//Create files with different mtimes
+	file1 := "fileA.txt"
+	file2 := "fileB.txt"
+	file3 := "fileC.log"
+	file4 := "fileD.txt"
+	file5 := "specific_fail.2.log"
+	file6 := "specific_fail.3.log"
+	//file7:="/opt/migration/worker-bucket/bucket_mig_succ.*.log"
+	os.WriteFile(tmpDir+"/"+file1, []byte("a"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(tmpDir+"/"+file2, []byte("b"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(tmpDir+"/"+file3, []byte("c"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(tmpDir+"/"+file4, []byte("d"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(tmpDir+"/"+file5, []byte("e"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(tmpDir+"/"+file6, []byte("f"), 0644)
+
+	// Update mtimes to control which is newest
+	now := time.Now()
+	os.Chtimes(tmpDir+"/"+file1, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
+	os.Chtimes(tmpDir+"/"+file2, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
+	os.Chtimes(tmpDir+"/"+file3, now.Add(-1*time.Hour), now.Add(-1*time.Hour))
+	os.Chtimes(tmpDir+"/"+file4, now, now)
+	os.Chtimes(tmpDir+"/"+file5, now.Add(-1*time.Hour), now.Add(-1*time.Hour))
+	os.Chtimes(tmpDir+"/"+file6, now, now)
+
+	type fields struct {
+		command           string
+		requestPayload    string
+		sshHost           string
+		sshKey            string
+		sshUser           string
+		timeout           time.Duration
+		showSpinny        bool
+		captureStdout     bool
+		captureStderr     bool
+		statusCode        int
+		responseBody      string
+		trimWhiteSpace    bool
+		directory         string
+		dump              bool
+		debugSSH          bool
+		ignoreExitCodeOne bool
+	}
+	type args struct {
+		fuzzy string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   string
+	}{
+		{
+			name: "No wildcard returns input",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				fuzzy: tmpDir + "/fileA.txt",
+			},
+			want: tmpDir + "/fileA.txt",
+		},
+		{
+			name: "Wildcard returns newest .txt file",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				fuzzy: tmpDir + "/*.txt",
+			},
+			want: tmpDir + "/fileD.txt", // newest .txt file
+		},
+		{
+			name: "Wildcard returns newest .log file",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				fuzzy: tmpDir + "/file*.log",
+			},
+			want: tmpDir + "/fileC.log",
+		},
+		{
+			name: "Wildcard no match returns empty",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				fuzzy: tmpDir + "/*.doesnotexist",
+			},
+			want: "",
+		},
+		{
+			name: "Empty fuzzy returns empty",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				fuzzy: "",
+			},
+			want: "",
+		},
+
+		{
+			name: "No wildcard returns input (via ssh)",
+			fields: fields{
+				directory: tmpDir,
+				sshHost:   "localhost",
+				sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+				sshUser:   os.Getenv("USER"),
+			},
+			args: args{
+				fuzzy: tmpDir + "/fileA.txt",
+			},
+			want: tmpDir + "/fileA.txt",
+		},
+		{
+			name: "Wildcard returns newest .txt file (via ssh)",
+			fields: fields{
+				directory: tmpDir,
+				sshHost:   "localhost",
+				sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+				sshUser:   os.Getenv("USER"),
+			},
+			args: args{
+				fuzzy: tmpDir + "/*.txt",
+			},
+			want: tmpDir + "/fileD.txt", // newest .txt file
+		},
+		{
+			name: "Wildcard returns newest .log file (via ssh)",
+			fields: fields{
+				directory: tmpDir,
+				sshHost:   "localhost",
+				sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+				sshUser:   os.Getenv("USER"),
+			},
+			args: args{
+				fuzzy: tmpDir + "/file*.log",
+			},
+			want: tmpDir + "/fileC.log",
+		},
+		{
+			name: "Wildcard no match returns empty (via ssh)",
+			fields: fields{
+				directory: tmpDir,
+				sshHost:   "localhost",
+				sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+				sshUser:   os.Getenv("USER"),
+			},
+			args: args{
+				fuzzy: tmpDir + "/*.doesnotexist",
+			},
+			want: "",
+		},
+		{
+			name: "Empty fuzzy returns empty (via ssh)",
+			fields: fields{
+				directory: tmpDir,
+				sshHost:   "localhost",
+				sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+				sshUser:   os.Getenv("USER"),
+			},
+			args: args{
+				fuzzy: "",
+			},
+			want: "",
+		},
+		{
+			name: "file fail log (via ssh)",
+			fields: fields{
+				directory: tmpDir,
+				sshHost:   "localhost",
+				sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+				sshUser:   os.Getenv("USER"),
+			},
+			args: args{
+				fuzzy: tmpDir + "/specific_fail.*.log",
+			},
+			want: tmpDir + "/specific_fail.3.log",
+		},
+		{
+			name: "file fail log",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				fuzzy: tmpDir + "/specific_fail.*.log",
+			},
+			want: tmpDir + "/specific_fail.3.log",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &CLIExecutor{
+				command:           tt.fields.command,
+				requestPayload:    tt.fields.requestPayload,
+				sshHost:           tt.fields.sshHost,
+				sshKey:            tt.fields.sshKey,
+				sshUser:           tt.fields.sshUser,
+				timeout:           tt.fields.timeout,
+				showSpinny:        tt.fields.showSpinny,
+				captureStdout:     tt.fields.captureStdout,
+				captureStderr:     tt.fields.captureStderr,
+				statusCode:        tt.fields.statusCode,
+				responseBody:      tt.fields.responseBody,
+				trimWhiteSpace:    tt.fields.trimWhiteSpace,
+				directory:         tt.fields.directory,
+				dump:              tt.fields.dump,
+				debugSSH:          tt.fields.debugSSH,
+				ignoreExitCodeOne: tt.fields.ignoreExitCodeOne,
+			}
+			if err := c.NormalizeName(tt.args.fuzzy); err != nil {
+				t.Errorf("CLIExecutor.NormalizeName() error = %v", err)
+			}
+			got := c.GetResponseBody()
+			fmt.Println("t=", tt.name)
+			fmt.Printf("\tgot: %s vs want %s\n", got, tt.want)
+			if got != tt.want {
+				t.Errorf("CLIExecutor.NormalizeName() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

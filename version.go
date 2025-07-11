@@ -25,7 +25,8 @@ func buildVersion(gitbranch string, gitversion string, gittimestamp string, main
 
 	var gb string
 	//fmt.Printf("Comparing %q vs %q\n", GitBranch, mainbranch)
-	if strings.EqualFold(GitBranch, mainbranch) || production {
+	VerbosePrintln("production = " + GitProduction)
+	if strings.EqualFold(GitBranch, mainbranch) || !strings.EqualFold(GitProduction, "") {
 		gb = ""
 	} else {
 		gb = "-" + GitBranch

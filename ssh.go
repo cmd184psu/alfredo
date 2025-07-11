@@ -51,18 +51,18 @@ func GetCCTypeOf(cc string) CrossCopyModeType {
 }
 
 type SSHStruct struct {
-	Key            string `json:"key"`
-	User           string `json:"user"`
-	Host           string `json:"host"`
+	Key            string `json:"key,omitempty"` //ssh key file, if empty, use ~/.ssh/id_rsa
+	User           string `json:"user,omitempty"` //ssh user, if empty, use $USER
+	Host           string `json:"host,omitempty"`
 	capture        bool
 	stdout         string
 	stderr         string
 	port           int
-	RemoteDir      string `json:"remotedir"`
+	RemoteDir      string `json:"remotedir,omitempty"` //remote directory to execute commands in, if empty, use home dir
 	silent         bool
 	exitCode       int
 	ccmode         CrossCopyModeType
-	ConnectTimeout int `json:"connecttimeout"` //ssh -o ConnectTimeout=10
+	ConnectTimeout int `json:"connecttimeout,omitempty"` //ssh -o ConnectTimeout=10
 	request        string
 	//parentExe      *ExecStruct
 }
@@ -303,7 +303,7 @@ func (s SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) err
 
 func (s SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath string) error {
 	localFilePath = ExpandTilde(localFilePath)
-	return GoFuncAndSpin(s.SecureDownload, localFilePath, remoteFilePath)
+	return GoFuncAndSpin(s.SecureDownload, remoteFilePath, localFilePath)
 
 	// var err error
 	// var wg sync.WaitGroup
@@ -473,6 +473,19 @@ func (s *SSHStruct) SecureRemoteExecution(cli string) error {
 	VerbosePrintln(s.stdout)
 	return errors.New("ssh process exited with errors")
 }
+
+func (ssh SSHStruct) RemoteFileCount(sdirectoryPath string, prefix string, glob string) (int, error) {
+	cli := GetFileFindCLI(sdirectoryPath, prefix, glob)
+	if err := ssh.SecureRemoteExecution(cli); err != nil {
+		return 0, err
+	}
+	result := strings.Split(strings.TrimSpace(ssh.GetBody()), "\n")
+	// for l,r:= range result {
+	// 	fmt.Printf("line: %d=%s\n",l, r)
+	// }
+	return len(result), nil
+}
+
 func (ssh SSHStruct) RemoteFindFiles(sdirectoryPath string, prefix string, glob string) ([]string, error) {
 	cli := GetFileFindCLI(sdirectoryPath, prefix, glob)
 	var result []string
@@ -1068,6 +1081,19 @@ func (s *SSHStruct) GetLastModifiedTime(remoteFile string) (time.Time, error) {
 	return time.Unix(epochSeconds, 0), nil
 }
 
+func (s *SSHStruct) GetRemoteFileSize(remoteFile string) (int64, error) {
+	// Execute the command to get the file size in bytes
+	if err := s.SecureRemoteExecution(fmt.Sprintf("stat -c %%s %s", remoteFile)); err != nil {
+		return 0, err
+	}
+	sizeStr := strings.TrimSpace(s.GetBody())
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
+}
+
 func (s *SSHStruct) SyncFileWithRemote(localFile string, remoteFile string, hashValidation bool, createDirectories bool) error {
 	// Check if the SSH connection is configured
 	localFile = ExpandTilde(localFile)
@@ -1200,6 +1226,7 @@ func (s *SSHStruct) SyncFileWithRemote(localFile string, remoteFile string, hash
 	} else {
 		// Remote file is newer, download it
 		VerbosePrintln("Remote file is newer, proceeding with download")
+		VerbosePrintf("\tdownloading %s ===> %s", remoteFile, localFile)
 		if err := s.SecureDownloadAndSpin(remoteFile, localFile); err != nil {
 			return fmt.Errorf("failed to download remote file: %v", err)
 		}

@@ -1080,6 +1080,9 @@ func GenerateFilename(f string, suffix string) FilenameStruct {
 	newFileBase := fns.GetBase() + suffix
 	if hasStats && !fns.hasDate {
 		newFileBase += fns.GetModTime()
+	} else if !hasStats && !fns.hasDate {
+		// if we don't have stats, we can't get the mod time, so just use the base
+		newFileBase += time.Now().Format("02Jan2006")
 	}
 	fns.SetBase(newFileBase)
 	fns.SetFullName(fmt.Sprintf("%s/%s%s", fns.GetPath(), fns.GetBase(), fns.GetExt()))
@@ -1196,4 +1199,25 @@ func CreateTempFile(size int64, sparse bool) (string, error) {
 	}
 
 	return filepath.Abs(tmpFile.Name())
+}
+
+func IsIPAddress(s string) bool {
+	parts := strings.Split(s, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, p := range parts {
+		if len(p) == 0 {
+			return false
+		}
+		num, err := strconv.Atoi(p)
+		if err != nil || num < 0 || num > 255 {
+			return false
+		}
+	}
+	return true
+}
+
+func GetTopLevelDir() string {
+	return filepath.Base(EatErrorReturnString(os.Getwd()))
 }

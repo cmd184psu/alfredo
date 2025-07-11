@@ -326,3 +326,35 @@ func (jhs JwtHttpsServerStruct) ValidateBearerToken(w http.ResponseWriter, r *ht
 
 	return strings.EqualFold(parts[1], string(jhs.GetKey()))
 }
+
+// IsTokenExpired checks if a JWT token has expired on the client side
+// Returns true if the token is expired, false if still valid, and error if token is malformed
+func IsTokenExpired(tokenString string) (bool, error) {
+        if len(tokenString) == 0 {
+                return true, nil
+        }
+        // Parse the token without verification (client-side check only)
+        token, _, err := new(jwt.Parser).ParseUnverified(tokenString, &JwtClaims{})
+        if err != nil {
+                return true, fmt.Errorf("failed to parse token: %v", err)
+        }
+
+        if claims, ok := token.Claims.(*JwtClaims); ok {
+                // Check if token has expired
+                if claims.ExpiresAt != nil && claims.ExpiresAt.Time.Before(time.Now()) {
+                        return true, nil // Token is expired
+                }
+                return false, nil // Token is still valid
+        }
+
+        return true, fmt.Errorf("invalid token claims")
+}
+
+func IsTokenExpiredEasy(tokenString string) bool {
+        b, err := IsTokenExpired(tokenString)
+        if err != nil {
+                panic("IsTokenExpiredEasy: " + err.Error())
+        }
+        return b
+}
+
