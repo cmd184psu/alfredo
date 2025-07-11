@@ -4,7 +4,6 @@ go 1.23.1
 
 require (
 	github.com/aws/aws-sdk-go v1.55.7
-	github.com/golang-jwt/jwt v3.1.9+incompatible
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/pkg/sftp v1.13.9
 	golang.org/x/crypto v0.40.0
