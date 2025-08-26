@@ -51,7 +51,7 @@ func GetCCTypeOf(cc string) CrossCopyModeType {
 }
 
 type SSHStruct struct {
-	Key            string `json:"key,omitempty"` //ssh key file, if empty, use ~/.ssh/id_rsa
+	Key            string `json:"key,omitempty"`  //ssh key file, if empty, use ~/.ssh/id_rsa
 	User           string `json:"user,omitempty"` //ssh user, if empty, use $USER
 	Host           string `json:"host,omitempty"`
 	capture        bool
@@ -1253,4 +1253,13 @@ func (s *SSHStruct) SyncFileWithRemote(localFile string, remoteFile string, hash
 
 func (s *SSHStruct) Load(fileName string) error {
 	return ReadStructFromJSONFile(fileName, s)
+}
+
+func (s SSHStruct) IsUp() bool {
+	exe := NewCLIExecutor()
+	exe.WithSSHStruct(s).WithCommand("/usr/bin/true").WithTimeout(1 * time.Second)
+	if err := exe.Execute(); err != nil {
+		return false
+	}
+	return true
 }
