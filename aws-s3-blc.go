@@ -277,7 +277,33 @@ func (s3c *S3ClientSession) RemoveLifecycleRule(ruleID string) error {
 	return s3c.PutLifecycleRules(newRules)
 }
 
-func (s3c *S3ClientSession) AddLifecycleRule(newRule *s3.LifecycleRule, customHeaders map[string]string) error {
+func (s3c *S3ClientSession) GetBucketLifecycleRules() ([]*s3.LifecycleRule, error) {
+	if !s3c.established {
+		if err := s3c.EstablishSession(); err != nil {
+			return nil, err
+		}
+	}
+
+	resp, err := s3c.Client.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{
+		Bucket: aws.String(s3c.Bucket),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get lifecycle: %w", err)
+	}
+
+	if len(resp.Rules) > 0 {
+		return resp.Rules, nil
+	}
+
+	return nil, nil
+
+}
+
+func (s3c *S3ClientSession) AddLifecycleRule(newrule *s3.LifecycleRule) error {
+	return s3c.AddLifecycleRuleCustomHeaders(newrule, map[string]string{})
+}
+
+func (s3c *S3ClientSession) AddLifecycleRuleCustomHeaders(newRule *s3.LifecycleRule, customHeaders map[string]string) error {
 	if !s3c.established {
 		if err := s3c.EstablishSession(); err != nil {
 			return err

@@ -2,6 +2,7 @@ package alfredo
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -109,6 +110,8 @@ func (s *SSHStruct) CreateClientConfig() ssh.ClientConfig {
 	if len(s.User) == 0 {
 		s.User = os.Getenv("USER")
 	}
+
+	VerbosePrintf("ssh.ClientConfig{\n\tHostKeyCallback: ssh.InsecureIgnoreHostKey(),\n\tUser: %s,\n\tAuth: []ssh.AuthMethod{\n\t\tssh.PublicKeys(privateKey),\n\t}}", s.User)
 	return ssh.ClientConfig{
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		User:            s.User,
@@ -1263,3 +1266,81 @@ func (s SSHStruct) IsUp() bool {
 	}
 	return true
 }
+
+func (s SSHStruct) DeepCopy() SSHStruct {
+	var newone SSHStruct
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err.Error())
+	}
+	if err := json.Unmarshal(b, &newone); err != nil {
+		panic(err.Error())
+	}
+	return newone
+}
+
+func (s SSHStruct) ChangePassword(newPass string) error {
+	if len(s.User) == 0 {
+		return fmt.Errorf("ChangePassword: missing user")
+	}
+	payload := fmt.Sprintf("%s:%s\n", s.User, newPass)
+	cli := "chpasswd"
+	return s.SecureRemotePipeExecution([]byte(payload), cli)
+}
+
+// func (s SSHStruct) ChangeRootPassword(newPass string) error {
+// 	// read private key file
+// 	keyBytes, err := ioutil.ReadFile(sshKeyPath)
+// 	if err != nil {
+// 		return fmt.Errorf("reading private key %q: %w", sshKeyPath, err)
+// 	}
+
+// 	// parse private key
+// 	signer, err := ssh.ParsePrivateKey(keyBytes)
+// 	if err != nil {
+// 		return fmt.Errorf("parsing private key: %w", err)
+// 	}
+
+// 	config := &ssh.ClientConfig{
+// 		User:            "root",
+// 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+// 		Timeout:         15 * time.Second,
+// 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // <-- production: replace with proper verification
+// 	}
+
+// 	addr := net.JoinHostPort(ip, "22")
+// 	client, err := ssh.Dial("tcp", addr, config)
+// 	if err != nil {
+// 		return fmt.Errorf("dial %s: %w", addr, err)
+// 	}
+// 	defer client.Close()
+
+// 	session, err := client.NewSession()
+// 	if err != nil {
+// 		return fmt.Errorf("creating session: %w", err)
+// 	}
+// 	defer session.Close()
+
+// 	stdin, err := session.StdinPipe()
+// 	if err != nil {
+// 		return fmt.Errorf("getting stdin pipe: %w", err)
+// 	}
+
+// 	// Start chpasswd and write "root:<password>\n" to its stdin.
+// 	// chpasswd reads input in the form "username:password"
+// 	if err := session.Start("chpasswd"); err != nil {
+// 		return fmt.Errorf("starting chpasswd: %w", err)
+// 	}
+
+// 	_, err = fmt.Fprintf(stdin, "root:%s\n", newPass)
+// 	if err != nil {
+// 		return fmt.Errorf("writing to chpasswd stdin: %w", err)
+// 	}
+// 	stdin.Close()
+
+// 	if err := session.Wait(); err != nil {
+// 		return fmt.Errorf("chpasswd returned error: %w", err)
+// 	}
+
+// 	return nil
+// }

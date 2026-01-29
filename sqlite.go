@@ -59,6 +59,10 @@ func (db *DatabaseStruct) WithTable(table string) *DatabaseStruct {
 	return db
 }
 
+func (db *DatabaseStruct) GetTable() string {
+	return db.Table
+}
+
 func (db *DatabaseStruct) WithSSH(host string, key string) *DatabaseStruct {
 	db.exe.sshHost = host
 	db.exe.sshKey = key
@@ -70,7 +74,7 @@ func (db *DatabaseStruct) CLItarget() string {
 }
 
 func (db *DatabaseStruct) QueryPayload(sel string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("QueryPayload: where clause should not contain WHERE")
 	}
 
@@ -82,19 +86,19 @@ func (db *DatabaseStruct) QueryPayload(sel string, where string) string {
 }
 
 func (db *DatabaseStruct) CountPayload(c string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("CountPayload: where clause should not contain WHERE")
 	}
 	return db.QueryPayload(fmt.Sprintf("COUNT(%s)", c), where)
 }
 func (db *DatabaseStruct) AvgPayload(c string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("AvgPayload: where clause should not contain WHERE")
 	}
 	return db.QueryPayload(fmt.Sprintf("AVG(%s)", c), where)
 }
 func (db *DatabaseStruct) SumPayload(c string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("SumPayload: where clause should not contain WHERE")
 	}
 	return db.QueryPayload(fmt.Sprintf("SUM(%s)", c), where)
@@ -103,7 +107,7 @@ func (db *DatabaseStruct) SumPayload(c string, where string) string {
 //sqlite3 your_database.db "UPDATE your_table SET state = 1 WHERE size > 1000 AND state = 0;"
 
 func (db *DatabaseStruct) UpdatePayload(set string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("UpdatePayload: where clause should not contain WHERE")
 	}
 
@@ -113,8 +117,21 @@ func (db *DatabaseStruct) UpdatePayload(set string, where string) string {
 	}
 	return fmt.Sprintf("UPDATE %s SET %s%s;\n", db.Table, set, w)
 }
+
+func (db *DatabaseStruct) InsertPayload( values string) string {
+	return fmt.Sprintf("INSERT INTO %s VALUES (%s);\n", db.Table, values)
+}
+
+func (db *DatabaseStruct) Insert(values string) error {
+	db.exe.WithRequestPayload(db.InsertPayload(values))
+
+	VerbosePrintf("echo %q | %s", db.GetPayload(), db.exe.GetCli())
+
+	return db.Execute()
+}
+
 func (db *DatabaseStruct) DeletePayload(where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("DeletePayload: where clause should not contain WHERE")
 	}
 
@@ -126,7 +143,7 @@ func (db *DatabaseStruct) DeletePayload(where string) string {
 }
 
 func (db *DatabaseStruct) Delete(where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("Delete: where clause should not contain WHERE")
 	}
 
@@ -147,7 +164,7 @@ func (db *DatabaseStruct) GetPayload() string {
 	return db.exe.GetRequestPayload()
 }
 func (db *DatabaseStruct) Count(sel string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("Count: where clause should not contain WHERE")
 	}
 
@@ -158,7 +175,7 @@ func (db *DatabaseStruct) Count(sel string, where string) error {
 	return db.Execute()
 }
 func (db *DatabaseStruct) Sum(sel string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("Sum: where clause should not contain WHERE")
 	}
 	if len(sel) == 0 || sel == "*" {
@@ -171,7 +188,7 @@ func (db *DatabaseStruct) Sum(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Avg(sel string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("Avg: where clause should not contain WHERE")
 	}
 
@@ -184,7 +201,7 @@ func (db *DatabaseStruct) Avg(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Update(set string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where,"EXISTS") {
 		panic("Update: where clause should not contain WHERE")
 	}
 

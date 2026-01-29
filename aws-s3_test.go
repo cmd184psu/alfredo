@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync/atomic"
 	"testing"
 
@@ -535,8 +536,11 @@ func TestCopyAllObjects(t *testing.T) {
 	// Mock CopyObject (assuming it's called in CopyObjectBetweenBuckets)
 	mockTargetS3Client.On("CopyObject", mock.Anything).Return(&s3.CopyObjectOutput{}, nil)
 
+	successLogger := log.New(io.Discard, "SUCCESS: ", log.LstdFlags)
+	failLogger := log.New(io.Discard, "FAIL: ", log.LstdFlags)
+
 	// Call the function
-	err := sourceS3.CopyAllObjectsBatch(targetS3, progress, 0)
+	err := sourceS3.CopyAllObjectsBatch(targetS3, progress, successLogger, failLogger, 0)
 
 	// Assertions
 	assert.NoError(t, err)
@@ -585,7 +589,10 @@ func TestCopyAllObjectsWithFailure(t *testing.T) {
 		return *input.Key == "object2"
 	})).Return(&s3.CopyObjectOutput{}, errors.New("copy failed"))
 
-	err := sourceS3.CopyAllObjectsBatch(targetS3, progress, 0)
+	successLogger := log.New(io.Discard, "SUCCESS: ", log.LstdFlags)
+	failLogger := log.New(io.Discard, "FAIL: ", log.LstdFlags)
+
+	err := sourceS3.CopyAllObjectsBatch(targetS3, progress, successLogger, failLogger, 0)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(2), atomic.LoadInt64(&progress.TotalObjects))

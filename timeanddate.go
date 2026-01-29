@@ -64,6 +64,18 @@ func GetLastModifiedTime(localFile string) (time.Time, error) {
 	return fileInfo.ModTime(), nil
 }
 
+func GetFileSize(localFile string) (int64, error) {
+
+	// Get file info
+	fileInfo, err := os.Stat(ExpandTilde(localFile))
+	if err != nil {
+		return 0, err
+	}
+
+	// Return the file size in bytes
+	return fileInfo.Size(), nil
+}
+
 func SecondsToTimestamp(seconds int64) string {
 	// Convert seconds to time.Time
 	date := time.Unix(seconds, 0)

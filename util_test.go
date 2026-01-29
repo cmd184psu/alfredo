@@ -14,7 +14,9 @@ package alfredo
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestFileBaseContainsDate(t *testing.T) {
@@ -175,6 +177,83 @@ func Test_getPassCodeFromSlice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := getPassCodeFromSlice(tt.args.s); got != tt.want {
 				t.Errorf("getPassCodeFromSlice(%s) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+func TestGetNewFilenameWithDateStampEasy(t *testing.T) {
+
+	exe:=NewCLIExecutor().WithDirectory("/tmp")
+
+	touchList:=[]string{}
+	touchList=append(touchList,"/tmp/example.txt")
+	touchList=append(touchList,"/tmp/example")
+	touchList=append(touchList,"/tmp/example.file.txt")
+	touchList=append(touchList,"/tmp/example@123!.txt")
+
+	for _, file:=range touchList{
+		exe.WithCommand("touch " + file)
+		if err:=exe.Execute();err!=nil{
+			t.Fatalf("Failed to create test file %s: %v", file, err)
+		}
+		defer func(f string) {
+			exe2:=NewCLIExecutor()
+			exe2.WithCommand("rm " + f)
+			_ = exe2.Execute()
+		}(file)
+	}
+
+
+	tests := []struct {
+		name             string
+		originalFilename string
+		want             string
+	}{
+		{
+			name:             "Valid filename with extension",
+			originalFilename: "/tmp/example.txt",
+			want:             "/tmp/example-02Jan2006.txt", // Replace "02Jan2006" with the actual date format during runtime
+		},
+		{
+			name:             "Filename without extension",
+			originalFilename: "/tmp/example",
+			want:             "/tmp/example-02Jan2006", // Replace "02Jan2006" with the actual date format during runtime
+		},
+		{
+			name:             "Filename with multiple dots",
+			originalFilename: "/tmp/example.file.txt",
+			want:             "/tmp/example.file-02Jan2006.txt", // Replace "02Jan2006" with the actual date format during runtime
+		},
+		{
+			name:             "Filename with special characters",
+			originalFilename: "/tmp/example@123!.txt",
+			want:             "/tmp/example@123!-02Jan2006.txt", // Replace "02Jan2006" with the actual date format during runtime
+		},
+		{
+			name:             "Empty filename",
+			originalFilename: "",
+			want:             "", // Expecting a panic or error
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.originalFilename == "" {
+				defer func() {
+					if r := recover(); r == nil {
+						t.Errorf("Expected panic for empty filename, but function did not panic")
+					}
+				}()
+			}
+
+			got := GetNewFilenameWithDateStampEasy(tt.originalFilename)
+
+			// Replace "02Jan2006" in the expected result with the actual date during runtime
+			expectedDate := time.Now().Format("02Jan2006")
+			expected := strings.Replace(tt.want, "02Jan2006", expectedDate, 1)
+
+			if got != expected {
+				t.Errorf("GetNewFilenameWithDateStampEasy(%q) = %v, want %v", tt.originalFilename, got, expected)
 			}
 		})
 	}

@@ -11,13 +11,16 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/term"
 )
 
 const private_ssh_key_default = "%s/.ssh/id_rsa"
@@ -1220,4 +1223,52 @@ func IsIPAddress(s string) bool {
 
 func GetTopLevelDir() string {
 	return filepath.Base(EatErrorReturnString(os.Getwd()))
+}
+
+func PromptPasscode(prompt string) (string, error) {
+	// Save the current terminal state
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return "", err
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	// Handle Ctrl+C gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		term.Restore(int(os.Stdin.Fd()), oldState)
+		os.Exit(1)
+	}()
+
+	fmt.Print(prompt)
+
+	reader := bufio.NewReader(os.Stdin)
+	var pass []rune
+
+	for {
+		char, _, err := reader.ReadRune()
+		if err != nil {
+			return "", err
+		}
+
+		if char == '\n' || char == '\r' {
+			fmt.Println()
+			break
+		}
+
+		if char == 127 || char == '\b' { // handle backspace
+			if len(pass) > 0 {
+				pass = pass[:len(pass)-1]
+				// Move cursor back, erase, move back again
+				fmt.Print("\b \b")
+			}
+		} else {
+			pass = append(pass, char)
+			fmt.Print("●")
+		}
+	}
+
+	return string(pass), nil
 }
