@@ -26,7 +26,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.40.0
 	gopkg.in/ini.v1 v1.67.1
 )
 
