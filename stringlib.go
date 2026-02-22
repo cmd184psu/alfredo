@@ -837,3 +837,12 @@ func SummarizeField(filepath string, delim string, fieldNum int) ([]string, erro
 	sort.Strings(output)
 	return output, nil
 }
+
+func StripProtocol(httpAddr string) string {
+	if strings.HasPrefix(httpAddr, "http://") {
+		return httpAddr[7:]
+	} else if strings.HasPrefix(httpAddr, "https://") {
+		return httpAddr[8:]
+	}
+	return httpAddr
+}
