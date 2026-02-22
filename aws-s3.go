@@ -1213,7 +1213,7 @@ func (s3c *S3ClientSession) ListBuckets() []string {
 	// Call the ListBuckets API
 	result, err := s3c.Client.ListBuckets(listBucketsInput)
 	if err != nil {
-		VerbosePrintf("error listing buckets:%w", err)
+		VerbosePrintf("error listing buckets:%s", err.Error())
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			default:
@@ -1255,7 +1255,7 @@ func (s3c S3ClientSession) ListBucketsOLD() []string {
 
 	result, err := svc.ListBuckets(input)
 	if err != nil {
-		VerbosePrintf("error listing buckets:%w", err)
+		VerbosePrintf("error listing buckets:%s", err.Error())
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			default:
