@@ -1,8 +1,10 @@
 package alfredo
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -90,4 +92,43 @@ func SecondsToTimestamp(seconds int64) string {
 
 	// Return the formatted string
 	return fmt.Sprintf("%d-%s-%s %s:%s:%s", year, month, day, hours, minutes, secs)
+}
+
+type EpochTime struct {
+	time.Time
+}
+
+func (et *EpochTime) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" || string(data) == "" {
+		return nil
+	}
+
+	// Remove quotes if string, parse as number
+	s := strings.Trim(string(data), `"`)
+	ms, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+
+	*et = EpochTime{time.UnixMilli(ms)}
+	return nil
+}
+
+func (et EpochTime) MarshalJSON() ([]byte, error) {
+	return json.Marshal(et.Time.UnixMilli())
+}
+
+func (et *EpochTime) SetTime(t time.Time) {
+    et.Time = t
+}
+func (et *EpochTime) Now() {
+    et.Time = time.Now()
+}
+
+func (et *EpochTime) GetTime() time.Time {
+    return et.Time
+}
+
+func EpochTimeFromTime(t time.Time) EpochTime {
+    return EpochTime{Time: t}
 }
