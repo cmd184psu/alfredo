@@ -1439,7 +1439,13 @@ func (s3c *S3ClientSession) IsVersioningEnabled() error {
 			return nil
 		}
 
-		panic(err.Error())
+		if ! GetForce() {
+			panic(err.Error())
+		} else {
+			VerbosePrintln("error checking versioning, but force is set, so ignoring: " + err.Error())
+			s3c.Versioning = false
+			return err
+		}
 	}
 
 	// Check if versioning is enabled
