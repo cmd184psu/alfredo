@@ -50,8 +50,14 @@ func GetFindFileCLI(root string, pattern string, inType INodeType) string {
 	return fmt.Sprintf("find %s -iname %q", root, pattern)
 }
 
-func FindFiles(root string, pattern string, inType INodeType) []string {
+func FindFiles(symlinkedRoot string, pattern string, inType INodeType) []string {
 	var fileArray []string
+
+	root:=symlinkedRoot
+	root, slerr := filepath.EvalSymlinks(symlinkedRoot)
+	if slerr != nil {
+		panic(slerr)
+	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

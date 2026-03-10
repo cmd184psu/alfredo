@@ -1,8 +1,10 @@
 package alfredo
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -64,6 +66,26 @@ func GetLastModifiedTime(localFile string) (time.Time, error) {
 	return fileInfo.ModTime(), nil
 }
 
+func GetFileSize(localFile string) (int64, error) {
+
+	// Get file info
+	fileInfo, err := os.Stat(ExpandTilde(localFile))
+	if err != nil {
+		return 0, err
+	}
+
+	// Return the file size in bytes
+	return fileInfo.Size(), nil
+}
+
+func GetFileSizeEasy(localFile string) int64 {
+	s, err := GetFileSize(localFile)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get file size for %s: %v", localFile, err))
+	}
+	return s
+}
+
 func SecondsToTimestamp(seconds int64) string {
 	// Convert seconds to time.Time
 	date := time.Unix(seconds, 0)
@@ -78,4 +100,43 @@ func SecondsToTimestamp(seconds int64) string {
 
 	// Return the formatted string
 	return fmt.Sprintf("%d-%s-%s %s:%s:%s", year, month, day, hours, minutes, secs)
+}
+
+type EpochTime struct {
+	time.Time
+}
+
+func (et *EpochTime) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" || string(data) == "" {
+		return nil
+	}
+
+	// Remove quotes if string, parse as number
+	s := strings.Trim(string(data), `"`)
+	ms, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+
+	*et = EpochTime{time.UnixMilli(ms)}
+	return nil
+}
+
+func (et EpochTime) MarshalJSON() ([]byte, error) {
+	return json.Marshal(et.Time.UnixMilli())
+}
+
+func (et *EpochTime) SetTime(t time.Time) {
+	et.Time = t
+}
+func (et *EpochTime) Now() {
+	et.Time = time.Now()
+}
+
+func (et *EpochTime) GetTime() time.Time {
+	return et.Time
+}
+
+func EpochTimeFromTime(t time.Time) EpochTime {
+	return EpochTime{Time: t}
 }

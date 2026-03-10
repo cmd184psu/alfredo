@@ -356,3 +356,123 @@ func TestRemoveKeyPartialFromSlice(t *testing.T) {
 		})
 	}
 }
+func TestSummarizeField(t *testing.T) {
+	SetVerbose(true)
+	tests := []struct {
+		name     string
+		filepath string
+		fieldNum int
+		delim    string
+		content  string // Content to write to the file
+		want     []string
+		wantErr  bool
+		dne      bool
+	}{
+		{
+			name:     "Valid file with unique fields",
+			filepath: "testfile1.csv",
+			fieldNum: 1,
+			delim:    ",",
+			content: `apple,fruit
+		banana,fruit
+		cherry,fruit`,
+			want: []string{
+				"apple: 1",
+				"banana: 1",
+				"cherry: 1",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Valid file with duplicate fields",
+			filepath: "testfile2.csv",
+			fieldNum: 1,
+			delim:    ",",
+			content: `apple,fruit
+		banana,fruit
+		apple,fruit
+		cherry,fruit
+		banana,fruit`,
+			want: []string{
+				"apple: 2",
+				"banana: 2",
+				"cherry: 1",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Empty file",
+			filepath: "testfile3.csv",
+			fieldNum: 1,
+			delim:    ",",
+			content:  "",
+			want:     []string{},
+			wantErr:  false,
+		},
+		{
+			name:     "Field number out of range",
+			filepath: "testfile4.csv",
+			fieldNum: 3,
+			delim:    ",",
+			content: `apple,fruit
+		banana,fruit
+		cherry,fruit`,
+			want:    []string{},
+			wantErr: false,
+		},
+		{
+			name:     "File does not exist",
+			filepath: "nonexistent.csv",
+			fieldNum: 1,
+			delim:    ",",
+			content:  "",
+			want:     []string{},
+			wantErr:  true,
+			dne:      true,
+		},
+		{
+			name:     "File with empty fields",
+			filepath: "testfile5.csv",
+			fieldNum: 1,
+			delim:    ",",
+			content: `apple,fruit
+		,fruit
+		cherry,fruit`,
+			want: []string{
+				"apple: 1",
+				"cherry: 1",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary file if content is provided
+			if !tt.dne {
+				tmpFile, err := os.CreateTemp("", tt.filepath)
+				if err != nil {
+					t.Fatalf("Failed to create temporary file: %v", err)
+				}
+				defer os.Remove(tmpFile.Name())
+
+				_, err = tmpFile.WriteString(tt.content)
+				if err != nil {
+					t.Fatalf("Failed to write to temporary file: %v", err)
+				}
+
+				tmpFile.Close()
+				tt.filepath = tmpFile.Name()
+			}
+
+			got, gotErr := SummarizeField(tt.filepath, tt.delim, tt.fieldNum)
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("SummarizeField() error = %v, wantErr %v", gotErr, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SummarizeField() =got\n%s\n\nwant\n%s", PrettyPrint(got), PrettyPrint(tt.want))
+			}
+		})
+	}
+}

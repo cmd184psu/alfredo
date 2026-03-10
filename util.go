@@ -431,3 +431,34 @@ func GetPassCode(filename string) (string, error) {
 func EasyBoolErrIsFalse(r bool, err error) bool {
 	return r && err == nil
 }
+
+func GetNewFilenameWithDateStamp(originalFilename string) (string, error) {
+	// Get the file info to retrieve the last modified time
+	fileInfo, err := os.Stat(originalFilename)
+	if err != nil {
+		return "", fmt.Errorf("failed to get file info for %s: %v", originalFilename, err)
+	}
+
+	// Get the last modified date of the file
+	lastModifiedDate := fileInfo.ModTime().Format("02Jan2006")
+
+	// Create the new filename with the date stamp
+	newFilename := fmt.Sprintf("%s-%s%s", strings.TrimSuffix(filepath.Dir(originalFilename)+"/"+filepath.Base(originalFilename), filepath.Ext(originalFilename)), lastModifiedDate, filepath.Ext(originalFilename))
+	return newFilename, nil
+}
+
+func GetNewFilenameWithDateStampEasy(originalFilename string) string {
+	newFilename, err := GetNewFilenameWithDateStamp(originalFilename)
+	if err != nil {
+		panic(err.Error())
+	}
+	return newFilename
+}
+
+func GetShortHostName(fqdn string) string {
+	if len(fqdn) == 0 {
+		panic("alfredo error: fqdn given was blank")
+	}
+	parts := strings.Split(fqdn, ".")
+	return parts[0]
+}

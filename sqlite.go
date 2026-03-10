@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const sqlite_bin = "/usr/bin/sqlite3"
@@ -59,6 +60,10 @@ func (db *DatabaseStruct) WithTable(table string) *DatabaseStruct {
 	return db
 }
 
+func (db *DatabaseStruct) GetTable() string {
+	return db.Table
+}
+
 func (db *DatabaseStruct) WithSSH(host string, key string) *DatabaseStruct {
 	db.exe.sshHost = host
 	db.exe.sshKey = key
@@ -70,7 +75,7 @@ func (db *DatabaseStruct) CLItarget() string {
 }
 
 func (db *DatabaseStruct) QueryPayload(sel string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("QueryPayload: where clause should not contain WHERE")
 	}
 
@@ -82,19 +87,19 @@ func (db *DatabaseStruct) QueryPayload(sel string, where string) string {
 }
 
 func (db *DatabaseStruct) CountPayload(c string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("CountPayload: where clause should not contain WHERE")
 	}
 	return db.QueryPayload(fmt.Sprintf("COUNT(%s)", c), where)
 }
 func (db *DatabaseStruct) AvgPayload(c string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("AvgPayload: where clause should not contain WHERE")
 	}
 	return db.QueryPayload(fmt.Sprintf("AVG(%s)", c), where)
 }
 func (db *DatabaseStruct) SumPayload(c string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("SumPayload: where clause should not contain WHERE")
 	}
 	return db.QueryPayload(fmt.Sprintf("SUM(%s)", c), where)
@@ -103,7 +108,7 @@ func (db *DatabaseStruct) SumPayload(c string, where string) string {
 //sqlite3 your_database.db "UPDATE your_table SET state = 1 WHERE size > 1000 AND state = 0;"
 
 func (db *DatabaseStruct) UpdatePayload(set string, where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("UpdatePayload: where clause should not contain WHERE")
 	}
 
@@ -113,8 +118,21 @@ func (db *DatabaseStruct) UpdatePayload(set string, where string) string {
 	}
 	return fmt.Sprintf("UPDATE %s SET %s%s;\n", db.Table, set, w)
 }
+
+func (db *DatabaseStruct) InsertPayload(values string) string {
+	return fmt.Sprintf("INSERT INTO %s VALUES (%s);\n", db.Table, values)
+}
+
+func (db *DatabaseStruct) Insert(values string) error {
+	db.exe.WithRequestPayload(db.InsertPayload(values))
+
+	VerbosePrintf("echo %q | %s", db.GetPayload(), db.exe.GetCli())
+
+	return db.Execute()
+}
+
 func (db *DatabaseStruct) DeletePayload(where string) string {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("DeletePayload: where clause should not contain WHERE")
 	}
 
@@ -126,7 +144,7 @@ func (db *DatabaseStruct) DeletePayload(where string) string {
 }
 
 func (db *DatabaseStruct) Delete(where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("Delete: where clause should not contain WHERE")
 	}
 
@@ -139,7 +157,14 @@ func (db *DatabaseStruct) Execute() error {
 }
 
 func (db *DatabaseStruct) Query(query string) error {
-	db.exe.WithRequestPayload(query)
+	if strings.Contains(query, "%%") {
+		query = strings.ReplaceAll(query, "%%", "%")
+	}
+	if strings.Contains(query, "{{now}}") {
+		nowMs := fmt.Sprintf("%d", time.Now().UnixMilli())
+		query = strings.ReplaceAll(query, "{{now}}", nowMs)
+	}
+	db.exe.WithRequestPayload(query).DumpOutput()
 	return db.Execute()
 }
 
@@ -147,7 +172,7 @@ func (db *DatabaseStruct) GetPayload() string {
 	return db.exe.GetRequestPayload()
 }
 func (db *DatabaseStruct) Count(sel string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("Count: where clause should not contain WHERE")
 	}
 
@@ -158,7 +183,7 @@ func (db *DatabaseStruct) Count(sel string, where string) error {
 	return db.Execute()
 }
 func (db *DatabaseStruct) Sum(sel string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("Sum: where clause should not contain WHERE")
 	}
 	if len(sel) == 0 || sel == "*" {
@@ -171,7 +196,7 @@ func (db *DatabaseStruct) Sum(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Avg(sel string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("Avg: where clause should not contain WHERE")
 	}
 
@@ -184,7 +209,7 @@ func (db *DatabaseStruct) Avg(sel string, where string) error {
 }
 
 func (db *DatabaseStruct) Update(set string, where string) error {
-	if strings.Contains(where, "WHERE") {
+	if strings.Contains(where, "WHERE") && !strings.Contains(where, "EXISTS") {
 		panic("Update: where clause should not contain WHERE")
 	}
 
@@ -196,22 +221,46 @@ func (db *DatabaseStruct) GetResult() string {
 	return db.exe.GetResponseBody()
 }
 
+func (db *DatabaseStruct) GetResultAsSlice() []string {
+	r := db.exe.GetResponseBody()
+	if len(r) == 0 {
+		return []string{}
+	}
+	if r[0] != '[' && !strings.Contains(r, "|") {
+		return []string{r}
+	}
+	return strings.Split(r, "|")
+}
+
+func (db *DatabaseStruct) GetResultAsJson() string {
+	return PrettyPrint(db.exe.GetResponseBodyAsSlice())
+}
+
 func (db *DatabaseStruct) GetResultInt() int {
+	if len(db.GetResult()) == 0 {
+		return 0
+	}
 	result, err := strconv.Atoi(db.exe.GetResponseBody())
 	if err != nil {
-		return 0
+		panic("NAN")
+		//		return 0
 	}
 	return result
 }
 
 func (db *DatabaseStruct) GetResultInt64() int64 {
+	if len(db.GetResult()) == 0 {
+		return 0
+	}
+
 	return int64(db.GetResultFloat())
 }
 
 func (db *DatabaseStruct) GetResultFloat() float64 {
 	result, err := strconv.ParseFloat(db.exe.GetResponseBody(), 64)
 	if err != nil {
-		return 0.0
+		panic("NAN")
+		//		return 0.0
 	}
 	return result
 }

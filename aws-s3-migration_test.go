@@ -2,6 +2,8 @@ package alfredo
 
 import (
 	"context"
+	"log"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +106,11 @@ func TestMigrationMgrStruct_MigrateObject(t *testing.T) {
 	mockSourceS3 := new(MockS3Client)
 	mockTargetS3 := new(MockS3Client)
 	progress := &ProgressTracker{}
-	mgr := NewMigrationManager(srcS3c, tgtS3c, progress, 100)
+
+	failLogger := log.New(os.Stdout, "FAIL: ", log.LstdFlags)
+	successLogger := log.New(os.Stdout, "SUCCESS: ", log.LstdFlags)
+
+	mgr := NewMigrationManager(srcS3c, tgtS3c, progress, successLogger, failLogger, 100)
 
 	srcBody := aws.ReadSeekCloser(strings.NewReader(strings.Repeat("a", 1024)))
 	tgtBody := aws.ReadSeekCloser(strings.NewReader(strings.Repeat("a", 1024)))

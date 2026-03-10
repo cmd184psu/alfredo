@@ -17,14 +17,17 @@ import (
 )
 
 type MigrationMgrStruct struct {
-	SourceS3   *S3ClientSession
-	TargetS3   *S3ClientSession
-	Progress   *ProgressTracker
-	ErrorMsg   string
-	SourceHead *s3.HeadObjectOutput
-	TargetHead *s3.HeadObjectOutput
-	output     *s3.ListObjectsV2Output
-	WorkerPool chan struct{}
+	SourceS3                  *S3ClientSession
+	TargetS3                  *S3ClientSession
+	Progress                  *ProgressTracker
+	ErrorMsg                  string
+	SourceHead                *s3.HeadObjectOutput
+	TargetHead                *s3.HeadObjectOutput
+	output                    *s3.ListObjectsV2Output
+	WorkerPool                chan struct{}
+	SuccessLog                *log.Logger
+	FailLog                   *log.Logger
+	UseSourceAsPrefixOnTarget bool // if true, use source bucket name as prefix on target bucket
 }
 
 func (mgr *MigrationMgrStruct) Lock() {
@@ -47,10 +50,13 @@ func (mgr *MigrationMgrStruct) DeepCopy() *MigrationMgrStruct {
 	newMgr.TargetHead = nil
 	newMgr.output = nil
 	newMgr.WorkerPool = make(chan struct{}, mgr.SourceS3.GetConcurrency())
+	newMgr.SuccessLog = mgr.SuccessLog
+	newMgr.FailLog = mgr.FailLog
+	newMgr.UseSourceAsPrefixOnTarget = mgr.UseSourceAsPrefixOnTarget
 	return &newMgr
 }
 
-func NewMigrationManager(sourceS3 *S3ClientSession, targetS3 *S3ClientSession, progress *ProgressTracker, batchSize int) *MigrationMgrStruct {
+func NewMigrationManager(sourceS3 *S3ClientSession, targetS3 *S3ClientSession, progress *ProgressTracker, sucessLog *log.Logger, failLog *log.Logger, batchSize int) *MigrationMgrStruct {
 	// Initialize pagination token
 	if batchSize < 1 || batchSize > 1000 {
 		batchSize = 1000
@@ -65,8 +71,15 @@ func NewMigrationManager(sourceS3 *S3ClientSession, targetS3 *S3ClientSession, p
 		SourceS3:   sourceS3,
 		TargetS3:   targetS3,
 		Progress:   progress,
+		SuccessLog: sucessLog,
+		FailLog:    failLog,
 		WorkerPool: make(chan struct{}, sourceS3.GetConcurrency()),
 	}
+}
+
+func (mgr *MigrationMgrStruct) WithUseSourceAsPrefixOnTarget(usePrefix bool) *MigrationMgrStruct {
+	mgr.UseSourceAsPrefixOnTarget = usePrefix
+	return mgr
 }
 
 func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *chan CopyResult) error {
@@ -80,7 +93,7 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 	var err error
 	mgr.output, err = mgr.SourceS3.Client.ListObjectsV2WithContext(mgr.SourceS3.ctx, input)
 	if err != nil {
-		return fmt.Errorf("failed to list objects: %v", err)
+		return fmt.Errorf("MigrationLoop:: failed to list objects: %v", err)
 	}
 
 	log.Printf("found %d objects in bucket %s, in this page\n", len(mgr.output.Contents), mgr.SourceS3.Bucket)
@@ -88,7 +101,7 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 	if mgr.output.ContinuationToken != nil {
 		log.Printf("NextContinuationToken: %s\n", *mgr.output.ContinuationToken)
 	} else {
-		log.Printf("NextContinuationToken is nil\n")
+		log.Printf("MigrationLoop:: NextContinuationToken is nil\n")
 		panic("")
 	}
 
@@ -104,6 +117,9 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 		mgr.Unlock()
 		newMgr.SourceS3.ObjectKey = key
 		newMgr.TargetS3.ObjectKey = key
+		if mgr.UseSourceAsPrefixOnTarget {
+			newMgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + key
+		}
 		wg.Add(1)
 		go func(innerMgr *MigrationMgrStruct, objectSize int64) {
 			defer wg.Done()
@@ -122,15 +138,23 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 			// 	innerMgr.SourceS3.Bucket, innerMgr.SourceS3.ObjectKey,
 			// 	innerMgr.TargetS3.Bucket, innerMgr.TargetS3.ObjectKey,
 			// 	objectSize, HumanReadableStorageCapacity(objectSize))
+
+			if innerMgr.SuccessLog == nil {
+				panic("SuccessLog is nil, cannot proceed with migration")
+			}
+			if innerMgr.FailLog == nil {
+				panic("FailLog is nil, cannot proceed with migration")
+			}
+
 			err := innerMgr.MigrateObject(objectSize)
 
 			// log.Printf("after object migration %s/%s => %s/%s with size %d (%s)\n",
 			// 	innerMgr.SourceS3.Bucket, innerMgr.SourceS3.ObjectKey,
 			// 	innerMgr.TargetS3.Bucket, innerMgr.TargetS3.ObjectKey,
 			// 	objectSize, HumanReadableStorageCapacity(objectSize))
-			if err != nil {
-				log.Printf("\tWith error=: %v", err)
-			}
+			// if err != nil {
+			// 	log.Printf("\tWith error=: %v", err)
+			// }
 			result := CopyResult{
 				SourceKey:   innerMgr.SourceS3.ObjectKey,
 				TargetKey:   innerMgr.TargetS3.ObjectKey,
@@ -144,15 +168,22 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 				if !result.WasSkipped {
 					VerbosePrintf("Uploaded object to s3://%s/%s", innerMgr.TargetS3.Bucket, result.SourceKey)
 				}
-			} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
-				log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
-					innerMgr.TargetS3.Bucket, result.SourceKey)
-			} else {
-				log.Printf("Failed to upload object to s3://%s/%s: %v",
-					innerMgr.TargetS3.Bucket, result.SourceKey, result.Error)
+				//				innerMgr.SuccessLog.Printf("s3://%s/%s",
+				//					innerMgr.TargetS3.Bucket, result.SourceKey)
+				// } else if result.Error != nil && strings.Contains(result.Error.Error(), "skip limit exceeded") {
+				// 	//				log.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
+				// 	//					innerMgr.TargetS3.Bucket, result.SourceKey)
+				// 	innerMgr.FailLog.Printf("s3://%s/%s: %v",
+				// 		innerMgr.TargetS3.Bucket, result.SourceKey, result.Error)
+				// } else {
+				// 	fmt.Println("Error was caught and handled, sending to failure log")
+				// 	//				log.Printf("Failed to upload object to s3://%s/%s: %v",
+				// 	//					innerMgr.TargetS3.Bucket, result.SourceKey, result.Error)
+				// 	innerMgr.FailLog.Printf("s3://%s/%s: %v",
+				// 		innerMgr.TargetS3.Bucket, result.SourceKey, result.Error)
 			}
 
-//			log.Println("===== handle RESULT =====")
+			//			log.Println("===== handle RESULT =====")
 			select {
 			case *ResultsChan <- result:
 			case <-time.After(5 * time.Second):
@@ -188,6 +219,28 @@ func ParseKeyList(key string) (string, int64) {
 	}
 	return name, int64(sizeFloat)
 }
+
+func (result *CopyResult) ProcessError(fl *log.Logger) {
+	if len(result.SourceKey) == 0 {
+		panic("source object key was blank?")
+	}
+
+	if strings.Contains(result.Error.Error(), "NoSuchKey") {
+		fl.Printf("s3://%s/%s (status code 404)", result.Bucket, result.SourceKey)
+	} else if strings.Contains(result.Error.Error(), "AccessDenied") {
+		fl.Printf("s3://%s/%s (status code 403)", result.Bucket, result.SourceKey)
+	} else if strings.Contains(result.Error.Error(), "ServiceUnavailable") {
+		fl.Printf("s3://%s/%s (status code 503)", result.Bucket, result.SourceKey)
+	} else if strings.Contains(result.Error.Error(), "RequestTimeout") {
+		fl.Printf("s3://%s/%s (%v)", result.Bucket, result.SourceKey, result.Error)
+	} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
+		fl.Printf("s3://%s/%s (%v)", result.Bucket, result.SourceKey, result.Error)
+	} else {
+		fl.Printf("s3://%s/%s: %v", result.Bucket, result.SourceKey, result.Error)
+	}
+
+}
+
 func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup, ResultsChan *chan CopyResult) error {
 	//fmt.Printf("MigrationBatch(len(keys)==%d,wg,chan)\n", len(keys))
 	// Get one page of results
@@ -204,6 +257,11 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 		mgr.Unlock()
 		newMgr.SourceS3.ObjectKey = key
 		newMgr.TargetS3.ObjectKey = key
+
+		if mgr.UseSourceAsPrefixOnTarget {
+			newMgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + key
+		}
+
 
 		//fmt.Println("MigrationBatch::(launch go task) workking on key=", key, " i=", i)
 		wg.Add(1)
@@ -233,13 +291,23 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 			// 	innerMgr.SourceS3.Bucket, innerMgr.SourceS3.ObjectKey,
 			// 	innerMgr.TargetS3.Bucket, innerMgr.TargetS3.ObjectKey,
 			// 	objectSize, HumanReadableStorageCapacity(objectSize))
-			if err != nil {
-				log.Printf("\tWith error=: %v", err)
+			// if err != nil {
+			// 	log.Printf("\tWith error=: %v", err)
+			// 	mgr.FailLog.Printf("s3://%s/%s (%v)", innerMgr.SourceS3.Bucket, innerMgr.SourceS3.ObjectKey, err)
+			// }
+			log.Printf("returned from MigrateObject for %s/%s => %s/%s with size %d (%s)\n",
+				innerMgr.SourceS3.Bucket, innerMgr.SourceS3.ObjectKey,
+				innerMgr.TargetS3.Bucket, innerMgr.TargetS3.ObjectKey,
+				objectSize, HumanReadableStorageCapacity(objectSize))
+			if err == nil {
+				log.Printf("\terror was nil, implying success")
+			} else {
+				log.Printf("\terror = %v", err)
 			}
-
 			result := CopyResult{
 				SourceKey:   innerMgr.SourceS3.ObjectKey,
 				TargetKey:   innerMgr.TargetS3.ObjectKey,
+				Bucket:      innerMgr.SourceS3.Bucket,
 				Success:     err == nil,
 				Error:       err,
 				Duration:    time.Since(startTime),
@@ -253,17 +321,29 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 				// }
 				log.Printf("Objects skipped: %d / %d", mgr.Progress.SkippedObjects, mgr.Progress.TotalObjects)
 				log.Printf("bytes processed: %d / %d objects processed: %d / %d", mgr.Progress.CompletedBytes, mgr.Progress.TotalBytes, mgr.Progress.MigratedObjects, mgr.Progress.TotalObjects)
-			} else if result.Error == nil {
-				fmt.Print("Error was caught and handled, but not entirely successful")
-				fmt.Printf("Failed to upload object to s3://%s/%s",
+				innerMgr.SuccessLog.Printf("s3://%s/%s",
 					innerMgr.TargetS3.Bucket, result.SourceKey)
-			} else if strings.Contains(result.Error.Error(), "skip limit exceeded") {
-				fmt.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
-					innerMgr.TargetS3.Bucket, result.SourceKey)
+				// } else if result.Error == nil {
+				// 	fmt.Print("Error was caught and handled, but not entirely successful")
+				// 	fmt.Printf("Failed to upload object to s3://%s/%s",
+				// 		innerMgr.TargetS3.Bucket, result.SourceKey)
+				// 	innerMgr.FailLog.Printf("s3://%s/%s",
+				// 		innerMgr.TargetS3.Bucket, result.SourceKey)
 			} else {
-				fmt.Printf("Failed to upload object to s3://%s/%s: %v",
-					innerMgr.TargetS3.Bucket, result.SourceKey, result.Error)
+				result.ProcessError(innerMgr.FailLog)
 			}
+
+			// if
+			// 	fmt.Printf("Failed to upload object to s3://%s/%s: due to skip size limit exceeded",
+			// 			innerMgr.TargetS3.Bucket, result.SourceKey)
+			// 		innerMgr.FailLog.Printf("s3://%s/%s",
+			// 			innerMgr.TargetS3.Bucket, result.SourceKey)
+			// 	} else {
+			// 		fmt.Printf("Failed to upload object to s3://%s/%s: %v",
+			// 			innerMgr.TargetS3.Bucket, result.SourceKey, result.Error)
+			// 		innerMgr.FailLog.Printf("s3://%s/%s",
+			// 			innerMgr.TargetS3.Bucket, result.SourceKey)
+			// 	}
 
 			//fmt.Printf("sending result to channel (key=%s)\n", result.SourceKey) // this does happen
 			select {
@@ -285,6 +365,9 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 	VerbosePrintf("(ALIVE! 1) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 	if len(mgr.TargetS3.ObjectKey) == 0 {
 		mgr.TargetS3.ObjectKey = mgr.SourceS3.ObjectKey
+		if mgr.UseSourceAsPrefixOnTarget {
+			mgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + mgr.SourceS3.ObjectKey
+		}
 	}
 	// Get source object details
 	// For large files, use multipart upload with streaming
@@ -387,6 +470,7 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 				if err != nil {
 					VerbosePrintf("(DIE! -- in failing to upload part) CopyObjectBetweenBucketsMPU(...%s ==> %s; worker=%d, part=%d)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey, i, partNumber)
 					log.Printf("Failed to upload part %d: %v", partNumber, err)
+					mgr.FailLog.Printf("s3://%s/%s (part %d): %v", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey, partNumber, err)
 					errorsChan <- fmt.Errorf("failed to upload part %d: %v", partNumber, err)
 					return
 				}
@@ -418,9 +502,9 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 			UploadId: createOutput.UploadId,
 		})
 		if abortErr != nil {
-			log.Fatalf("failed to abort multipart upload: %v (original error: %v)", abortErr, err)
-			VerbosePrintf("(DIE! -- after abort failure) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
-			return fmt.Errorf("failed to abort multipart upload: %v (original error: %v)", abortErr, err)
+			log.Printf("WARNING: failed to abort multipart upload: %v (original error: %v)", abortErr, err)
+			// VerbosePrintf("(DIE! -- after abort failure) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
+			// return fmt.Errorf("failed to abort multipart upload: %v (original error: %v)", abortErr, err)
 		}
 		VerbosePrintf("(ALIVE with errors! hasErrors is now true) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 		//last we hear of handbrake
@@ -428,16 +512,16 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 
 	}
 
-	if hasErrors && !GetForce() {
-		log.Fatal("errors occurred; some objects MPU were aborted as a result")
+	// if hasErrors && !GetForce() {
+	// 	log.Fatal("errors occurred; some objects MPU were aborted as a result")
 
-		VerbosePrintf("(DIE! -- since we have errors) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
+	// 	VerbosePrintf("(DIE! -- since we have errors) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 
-		// if GetForce() {
-		// 	return nil
-		// }
-		// return fmt.Errorf("errors occurred; some objects MPU were aborted as a result")
-	}
+	// 	// if GetForce() {
+	// 	// 	return nil
+	// 	// }
+	// 	return fmt.Errorf("errors occurred; some objects MPU were aborted as a result")
+	// }
 
 	VerbosePrintf("(ALIVE! now look at parts) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 	log.Printf("Completed %d parts, checking for nil etags", len(parts))
@@ -457,7 +541,7 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 
 	if hasErrors {
 		VerbosePrintf("(ALIVE with errors, so we have to skip complete) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
-		err= fmt.Errorf("some parts failed to upload, skipping complete")
+		err = fmt.Errorf("some parts failed to upload, skipping complete")
 	} else {
 
 		// Complete multipart upload
@@ -473,9 +557,13 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 	}
 	if err != nil {
 		log.Printf("MPU for s3://%s/%s => s3://%s/%s  failed to complete", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
-		return fmt.Errorf("failed to complete multipart upload: %v", err)
+		//mgr.FailLog.Printf("MPU s3://%s/%s failed: %v", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey, err)
+		return err
 	}
 	log.Printf("Completing MPU for s3://%s/%s", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
+
+	//log success after return
+	//mgr.SuccessLog.Printf("MPU: s3://%s/%s", mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
 	//atomic.AddInt64(&mgr.Progress.CompletedBytes, *mgr.SourceHead.ContentLength)
 	//atomic.AddInt64(&mgr.Progress.MigratedObjects, 1)
 	log.Printf("Completed %d objects", mgr.Progress.MigratedObjects+1)
@@ -489,6 +577,9 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsRegular() error {
 	tgtKey := mgr.TargetS3.ObjectKey
 	if len(mgr.TargetS3.ObjectKey) == 0 {
 		mgr.TargetS3.ObjectKey = mgr.SourceS3.ObjectKey
+		if mgr.UseSourceAsPrefixOnTarget {
+			mgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + mgr.SourceS3.ObjectKey
+		}
 	}
 	// Get the object
 	getOutput, err := mgr.SourceS3.Client.GetObjectWithContext(mgr.SourceS3.ctx, &s3.GetObjectInput{
@@ -496,7 +587,26 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsRegular() error {
 		Key:    aws.String(mgr.SourceS3.ObjectKey),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to get source object: %v", err)
+		return err
+		// if strings.Contains(err.Error(), "NoSuchKey") {
+		// 	mgr.FailLog.Printf("s3://%s/%s (status code 404)", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey)
+		// 	return fmt.Errorf("failed to get source object: %v", err)
+		// }
+		// if strings.Contains(err.Error(), "AccessDenied") {
+		// 	mgr.FailLog.Printf("s3://%s/%s (status code 403)", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey)
+		// 	return fmt.Errorf("access denied to source object: %v", err)
+		// }
+		// if strings.Contains(err.Error(), "ServiceUnavailable") {
+		// 	mgr.FailLog.Printf("s3://%s/%s (status code 503)", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey)
+		// 	return fmt.Errorf("service unavailable for source object: %v", err)
+		// }
+		// if strings.Contains(err.Error(), "RequestTimeout") {
+		// 	mgr.FailLog.Printf("s3://%s/%s (%v)", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, err)
+		// 	return fmt.Errorf("request timeout for source object: %v", err)
+		// }
+		// mgr.FailLog.Printf("s3://%s/%s (%v)", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, err)
+		// return fmt.Errorf("default error state source object: %v", err)
+
 	}
 	defer getOutput.Body.Close()
 
@@ -599,9 +709,9 @@ func (mgr *MigrationMgrStruct) MigrateObject(size int64) error {
 	if size < defaultPartSizeMin {
 		VerbosePrintln("--- going regular copy ---")
 		if err := mgr.CopyObjectBetweenBucketsRegular(); err != nil {
-			log.Printf("Caught error during regular copy: %v", err)
+			//log.Printf("Caught error during regular copy: %v", err)
 			VerbosePrintf("(DIE! 5.1) MigrateObject(...%s ==> %s, size=%d)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey, size)
-			return nil
+			return err
 		}
 	} else {
 		VerbosePrintf("(ALIVE! 5.2 but die in this function) MigrateObject(...%s ==> %s, size=%d)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey, size)
@@ -614,7 +724,8 @@ func (mgr *MigrationMgrStruct) MigrateObject(size int64) error {
 	}
 
 	VerbosePrintf("(ALIVE! 6) MigrateObject(...%s ==> %s, size=%d)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey, size)
-	log.Printf("Migration of object (%s/%s) => (%s/%s) is complete", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
+	//mgr.SuccessLog.Printf("Migration of object (%s/%s) => (%s/%s) is complete", mgr.SourceS3.Bucket, mgr.SourceS3.ObjectKey, mgr.TargetS3.Bucket, mgr.TargetS3.ObjectKey)
+
 	//handle errors, record results, return error if needed
 	atomic.AddInt64(&mgr.Progress.MigratedObjects, 1)
 

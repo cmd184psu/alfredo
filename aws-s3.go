@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +18,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,10 @@ type S3credStruct struct {
 	ExpireDate int64  `json:"expireDate"`
 	SecretKey  string `json:"secretKey"`
 	Profile    string `json:"profile"`
+}
+
+func (cred *S3credStruct) String() string {
+	return fmt.Sprintf("%s:%s", cred.AccessKey, cred.SecretKey)
 }
 
 type S3ClientSession struct {
@@ -66,14 +71,18 @@ type S3ClientSession struct {
 	BatchSize           int `json:"batchSize"`
 	WasSkipped          bool
 	enforceCertificates bool
+	Owner               *s3.Owner `json:"owner,omitempty"`
+	EnableObjectLock    bool      `json:"enableObjectLock,omitempty"`
 }
 
 type S3Objects struct {
-	Object       string    `json:"object"`
-	Size         int64     `json:"size"`
-	Etag         string    `json:"etag"`
-	Owner        string    `json:"owner"`
-	LastModified time.Time `json:"lastModified"`
+	Object        string    `json:"object"`
+	Size          int64     `json:"size"`
+	Etag          string    `json:"etag"`
+	Owner         string    `json:"owner"`
+	LastModified  time.Time `json:"lastModified"`
+	RetentionDays int64     `json:"retentionDays"`
+	Versioned     bool      `json:"versioned"`
 }
 
 // deep copy with a clean new session
@@ -141,24 +150,24 @@ func (s3c *S3ClientSession) WithCertificateEnforcement(enforce bool) *S3ClientSe
 	s3c.enforceCertificates = enforce
 	return s3c
 }
-func (s3c *S3ClientSession) SetEndpoint(sep string) {
+
+func (s3c *S3ClientSession) WithEndpoint(sep string) *S3ClientSession {
 	if len(sep) == 0 {
 		panic("attempted to set endpoint to blank - use ClearEndpoint() instead")
 	}
 	s3c.Endpoint = sep
-
-	VerbosePrintf("!!! S3ClientSession::SetEndpoint(%s)", sep)
+	return s3c
 }
 
-func (s3c S3ClientSession) WithEndpoint(sep string) S3ClientSession {
-	s3c.SetEndpoint(sep)
+func (s3c *S3ClientSession) WithCredentials(cred S3credStruct) *S3ClientSession {
+	s3c.Credentials = cred
 	return s3c
 }
 
 func (s3c *S3ClientSession) SetRegion(r string) {
 	s3c.Region = r
 }
-func (s3c S3ClientSession) WithRegion(r string) S3ClientSession {
+func (s3c *S3ClientSession) WithRegion(r string) *S3ClientSession {
 	s3c.Region = r
 	return s3c
 }
@@ -208,7 +217,6 @@ func (s3c *S3ClientSession) EstablishSession() error {
 
 	if len(s3c.Region) == 0 {
 		panic("missing region")
-		//		return errors.New("missing region")
 	}
 
 	if GetDebug() {
@@ -231,12 +239,12 @@ func (s3c *S3ClientSession) EstablishSession() error {
 func (s3c *S3ClientSession) SetBucket(b string) {
 	s3c.Bucket = b
 }
-func (s3c S3ClientSession) WithBucket(b string) S3ClientSession {
+func (s3c *S3ClientSession) WithBucket(b string) *S3ClientSession {
 	s3c.Bucket = b
 	return s3c
 }
 
-func (s3c S3ClientSession) RemoveBucket() error {
+func (s3c *S3ClientSession) RemoveBucket() error {
 	if err := s3c.EstablishSession(); err != nil {
 		return err
 	}
@@ -287,20 +295,97 @@ func GenerateSignature(sts, secret string) string {
 	return base64.StdEncoding.EncodeToString(hash.Sum(nil))
 }
 
-func (s3c *S3ClientSession) generateSignature(date string) string {
+// func (s3c *S3ClientSession) generateSignaturev4(method, canonicalURI, queryString string) (string, error) {
+// 	// Create canonical request
+// 	canonicalHeaders := "host:" + s3c.Bucket + "\n" +
+// 		"x-amz-date:" + s3c.AmzDate + "\n"
+// 	xAmzHeaders := ""
+// 	if len(s3c.XAmzHeaders) > 0 {
+// 		for k, v := range s3c.XAmzHeaders {
+// 			canonicalHeaders += strings.ToLower(k) + ":" + v + "\n"
+// 			xAmzHeaders += strings.ToLower(k) + ";" + v + ";"
+// 		}
+// 	}
 
-	stringToSign := "PUT\n\n\n" + date + "\n/" + s3c.Bucket
-	//fmt.Printf("sts=%q\n", stringToSign)
+// 	signedHeaders := "host;x-amz-date" + (func() string {
+// 		if xAmzHeaders != "" {
+// 			return ";" + strings.TrimRight(xAmzHeaders, ";")
+// 		}
+// 		return ""
+// 	})()
 
-	//	stringToSign := fmt.Sprintf("PUT\\n\\n\\n%s\\n%s", date, "/"+s3c.Bucket)
-	//	stringToSign2 := fmt.Sprintf("PUT\\n\\n\\n%s\\n%s", date, "/"+s3c.Bucket)
-	VerbosePrintln("stringtosign: " + stringToSign)
-	//	VerbosePrintln("stringtosign2: " + stringToSign2)
-	// Generate HMAC-SHA1 hash
+// 	payloadHash, err := s3c.calculateMD5Hash()
+// 	if err != nil {
+// 		return "", err
+// 	}
+
+// 	canonicalRequest := method + "\n" +
+// 		canonicalURI + "\n" +
+// 		queryString + "\n" +
+// 		canonicalHeaders + "\n" +
+// 		signedHeaders + "\n" +
+// 		payloadHash
+
+// 	// Create string to sign
+// 	stringToSign := "AWS4-HMAC-SHA256\n" +
+// 		s3c.AmzDate + "\n" +
+// 		s3c.Scope + "\n" +
+// 		hex.EncodeToString(sha256.Sum256([]byte(canonicalRequest)))
+
+// 	return stringToSign, nil
+// }
+
+func (s3c *S3ClientSession) generateSignaturev2(date string, headers []string) string {
+	// Build CanonicalizedAmzHeaders
+	var amzLines []string
+	for _, h := range headers {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(parts[0]))
+		if !strings.HasPrefix(name, "x-amz-") {
+			continue
+		}
+		value := strings.TrimSpace(parts[1])
+
+		// If there are multiple headers with same name, they must be merged with commas
+		merged := false
+		for i, line := range amzLines {
+			existingParts := strings.SplitN(line, ":", 2)
+			if len(existingParts) != 2 {
+				continue
+			}
+			if existingParts[0] == name {
+				amzLines[i] = existingParts[0] + ":" + strings.TrimSpace(existingParts[1]) + "," + value
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			amzLines = append(amzLines, name+":"+value)
+		}
+	}
+
+	sort.Strings(amzLines)
+
+	canonicalizedAmzHeaders := ""
+	if len(amzLines) > 0 {
+		canonicalizedAmzHeaders = strings.Join(amzLines, "\n") + "\n"
+	}
+
+	// For PUT with no Content-MD5 / Content-Type this is:
+	// HTTP-VERB + "\n" + Content-MD5 + "\n" + Content-Type + "\n" + Date + "\n" + CanonicalizedAmzHeaders + CanonicalizedResource
+	// Content-MD5 and Content-Type are empty strings. [web:1]
+	stringToSign := "PUT\n\n\n" + date + "\n" + canonicalizedAmzHeaders + "/" + s3c.Bucket
+
+	VerbosePrintln("stringtosign: " + strconv.Quote(stringToSign))
+
 	return GenerateSignature(stringToSign, s3c.Credentials.SecretKey)
-	// hash := hmac.New(sha1.New, []byte(s3c.Credentials.SecretKey))
-	// hash.Write([]byte(stringToSign))
-	// return base64.StdEncoding.EncodeToString(hash.Sum(nil))
+}
+
+func removeProtocol(endpoint string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(endpoint, "http://", ""), "https://", "")
 }
 
 // function CalculateSignature() {
@@ -325,12 +410,91 @@ func (s3c *S3ClientSession) generateSignature(date string) string {
 // 	export AUTH="AWS ${accessKeyId}:${signature}"
 // }
 
+// Helper to generate AWS Signature V4 for signing requests (simplified)
+// func sign(key []byte, msg string) []byte {
+// 	h := hmac.New(sha256.New, key)
+// 	h.Write([]byte(msg))
+// 	return h.Sum(nil)
+// }
+
+// func (s3c *S3ClientSession) createBucketWithVersioningAndObjectLock(policyHeader string) error {
+// 	// Bucket creation request URL (endpoint + bucket name as subdomain or path)
+// 	url := fmt.Sprintf("%s/%s", s3c.Endpoint, s3c.Bucket)
+
+// 	// XML payload for create bucket with Object Lock enabled (AWS style)
+// 	createBucketXML := fmt.Sprintf(`
+// 	<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+// 		<LocationConstraint>%s</LocationConstraint>
+// 	</CreateBucketConfiguration>`, s3c.Region)
+
+// 	// Create HTTP PUT request for bucket creation with body
+// 	req, err := http.NewRequest("PUT", url, bytes.NewBufferString(createBucketXML))
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// Add required headers
+// 	req.Header.Set("Content-Type", "application/xml")
+// 	req.Header.Set("x-amz-object-lock-enabled-for-bucket", "true") // Enable object lock at creation
+// 	req.Header.Set("x-policy", policyHeader)                       // Custom header
+
+// 	// You might need to sign the request here for auth (AWS V4 signature or custom)
+
+// 	// Send request
+// 	client := &http.Client{}
+// 	resp, err := client.Do(req)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer resp.Body.Close()
+
+// 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+// 		bodyBytes, _ := io.ReadAll(resp.Body)
+// 		return fmt.Errorf("failed to create bucket: %s - %s", resp.Status, string(bodyBytes))
+// 	}
+
+// 	// Now enable versioning explicitly by sending a PUT versioning request
+// 	versioningXML := `<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+// 	<Status>Enabled</Status>
+// </VersioningConfiguration>`
+
+// 	versioningURL := url + "?versioning"
+// 	reqVersioning, err := http.NewRequest("PUT", versioningURL, bytes.NewBufferString(versioningXML))
+// 	if err != nil {
+// 		return err
+// 	}
+// 	reqVersioning.Header.Set("Content-Type", "application/xml")
+// 	reqVersioning.Header.Set("x-gmt-policyid", s3c.PolicyId)
+
+// 	// Send versioning enable request
+// 	resp2, err := client.Do(reqVersioning)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer resp2.Body.Close()
+
+// 	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusNoContent {
+// 		bodyBytes, _ := io.ReadAll(resp2.Body)
+// 		return fmt.Errorf("failed to enable versioning: %s - %s", resp2.Status, string(bodyBytes))
+// 	}
+
+// 	fmt.Println("Bucket created successfully with versioning and object lock enabled")
+// 	return nil
+// }
+
+// func main() {
+// 	err := createBucketWithVersioningAndObjectLock("https://s3.example.com", "region", "bucket", "storagepolicy")
+// 	if err != nil {
+// 		fmt.Println("Error:", err)
+// 	}
+// }
+
 func (s3c *S3ClientSession) createBucketWithPolicy() error {
 	VerbosePrintln("\n\n\nBEGIN::s3.createBucketWithPolicy()")
 
 	// Prepare the request URL
 	url := fmt.Sprintf("%s/%s", s3c.Endpoint, s3c.Bucket)
-
+	VerbosePrintf("url=%s\n", url)
 	// Prepare the request body (empty for bucket creation)
 	var requestBody []byte
 
@@ -354,20 +518,59 @@ func (s3c *S3ClientSession) createBucketWithPolicy() error {
 
 	req.Header.Set("Date", date)
 	req.Header.Set("x-gmt-policyid", s3c.PolicyId)
-	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+s3c.generateSignature(date))
+
+	headers := []string{}
+
+	if s3c.EnableObjectLock {
+		req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
+		headers = append(headers, "x-amz-bucket-object-lock-enabled:true")
+		VerbosePrintln("Object Lock ENABLED for bucket creation")
+	}
+
+	VerbosePrintf("setting policy header to %q\n", s3c.PolicyId)
+	VerbosePrintf("setting region to %q\n", s3c.Region)
+	if len(s3c.Region) == 0 {
+		panic("s3c.Region is empty")
+	}
+	body := fmt.Sprintf("<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n"+
+		"<LocationConstraint>%s</LocationConstraint>\n"+
+		"</CreateBucketConfiguration>\n", s3c.Region)
+
+	VerbosePrintf("body=%q\n", body)
+
+	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+s3c.generateSignaturev2(date, headers))
+	req.Header.Set("Host", s3c.Bucket+"."+removeProtocol(s3c.Endpoint))
+
+	VerbosePrintf("setting host header to %s.%s\n", s3c.Bucket, removeProtocol(s3c.Endpoint))
 	// Execute the HTTP request
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
 	client := &http.Client{Transport: tr}
+	req.Body = io.NopCloser(strings.NewReader(body))
 	resp, err := client.Do(req)
+
 	if err != nil {
+		VerbosePrintln("error creating bucket with policy: " + err.Error())
+		if strings.Contains(err.Error(), "connection refused") {
+			VerbosePrintln("connection refused")
+		}
 		return err
 	}
 	defer resp.Body.Close()
-
+	VerbosePrintf("create bucket status code: %d\n", resp.StatusCode)
+	VerbosePrintln("==========response body===========")
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	VerbosePrintln(string(bodyBytes))
+	VerbosePrintln("==========end response body===========")
 	// Check the response status code
 	if resp.StatusCode != http.StatusOK {
+		if err != nil {
+			VerbosePrintln("error creating bucket with policy: " + err.Error())
+		} else {
+			VerbosePrintln("error creating bucket with policy, status code: " + fmt.Sprintf("%d", resp.StatusCode))
+
+		}
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 	s3c.Response = resp
@@ -376,7 +579,86 @@ func (s3c *S3ClientSession) createBucketWithPolicy() error {
 	return nil
 }
 
+// eventually this function will replace createBucketWithPolicy()
+// func (s3c *S3ClientSession) createBucketWithPolicyv2(enableObjectLock bool) error {
+// 	VerbosePrintln("\n\n\nBEGIN::s3.createBucketWithPolicy()")
+
+// 	// Prepare the request URL
+// 	url := fmt.Sprintf("%s/%s", s3c.Endpoint, s3c.Bucket)
+// 	VerbosePrintf("url=%s\n", url)
+
+// 	// Prepare the request body
+// 	body := fmt.Sprintf(
+// 		`<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+// 			<LocationConstraint>%s</LocationConstraint>
+// 		</CreateBucketConfiguration>`, s3c.Region,
+// 	)
+// 	VerbosePrintf("body=%q\n", body)
+
+// 	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
+// 	if err != nil {
+// 		return fmt.Errorf("error creating request: %w", err)
+// 	}
+
+// 	now := time.Now().UTC()
+// 	date := strings.ReplaceAll(now.Format(time.RFC1123), "UTC", "+0000")
+
+// 	req.Header.Set("Date", date)
+// 	req.Header.Set("x-gmt-policyid", s3c.PolicyId)
+// 	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+s3c.generateSignaturev2(date, []string{}))
+// 	req.Header.Set("Host", s3c.Bucket+"."+removeProtocol(s3c.Endpoint))
+// 	req.Header.Set("Content-Type", "application/xml")
+
+// 	// if s3c.ObjectLock {
+// 	// 	req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
+// 	// 	VerbosePrintln("Object Lock ENABLED for bucket creation")
+// 	// } else {
+// 	VerbosePrintln("Object Lock not enabled")
+// 	// }
+
+// 	VerbosePrintf("setting policy header to %q\n", s3c.PolicyId)
+// 	VerbosePrintf("setting region to %q\n", s3c.Region)
+
+// 	if len(s3c.Region) == 0 {
+// 		panic("s3c.Region is empty")
+// 	}
+
+// 	// Prepare HTTP client
+// 	tr := &http.Transport{
+// 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
+// 	}
+// 	client := &http.Client{Transport: tr}
+
+// 	resp, err := client.Do(req)
+// 	if err != nil {
+// 		VerbosePrintln("error creating bucket with policy: " + err.Error())
+// 		if strings.Contains(err.Error(), "connection refused") {
+// 			VerbosePrintln("connection refused")
+// 		}
+// 		return err
+// 	}
+// 	defer resp.Body.Close()
+
+// 	bodyBytes, _ := io.ReadAll(resp.Body)
+// 	VerbosePrintf("create bucket status code: %d\n", resp.StatusCode)
+// 	VerbosePrintln("==========response body===========")
+// 	VerbosePrintln(string(bodyBytes))
+// 	VerbosePrintln("==========end response body===========")
+
+// 	if resp.StatusCode != http.StatusOK {
+// 		return fmt.Errorf("unexpected status code: %d - %s", resp.StatusCode, string(bodyBytes))
+// 	}
+
+// 	s3c.Response = resp
+// 	VerbosePrintln("\n\n\nEND::s3.createBucketWithPolicy()")
+// 	return nil
+// }
+
+// IMPORTANT: if using object lock, the bucket must be created with object lock
+//
+//	BUT then versioning is applied afterwards
 func (s3c *S3ClientSession) CreateBucket() error {
+
 	VerbosePrintln("\n\n\nBEGIN::s3.CreateBucket()")
 	if err := s3c.EstablishSession(); err != nil {
 		VerbosePrintln("error establishing session")
@@ -396,16 +678,34 @@ func (s3c *S3ClientSession) CreateBucket() error {
 
 	if len(s3c.PolicyId) == 0 || strings.EqualFold(s3c.PolicyId, "default") {
 		VerbosePrintln("s3c.Client.CreateBucket()")
+
 		s3out, s3err := s3c.Client.CreateBucket(&s3.CreateBucketInput{
-			Bucket: aws.String(s3c.Bucket),
+			Bucket:                     aws.String(s3c.Bucket),
+			ObjectLockEnabledForBucket: &s3c.EnableObjectLock,
 		})
 
 		VerbosePrintf("::::output: %q", s3out.String())
 
 		err = s3err
+		if err != nil {
+			VerbosePrintln("error:::: " + err.Error())
+			return err
+		}
 
 	} else {
-		return s3c.createBucketWithPolicy()
+		// if s3c.ObjectLock {
+		// 	if err := s3c.createBucketWithPolicyv2(); err != nil {
+		// 		return err
+		// 	}
+		// } else {
+		//legacy function until we test it
+		if err := s3c.createBucketWithPolicy(); err != nil {
+			return err
+		}
+		// }
+		// if err := s3c.createBucketWithPolicy(); err != nil {
+		// 	return err
+		// }
 	}
 	//aws s3api put-bucket-versioning --bucket ${bucket} --versioning-configuration Status=Enabled --endpoint-url=https://$ENDPOINT --no-verify-ssl --region region
 	if s3c.Versioning {
@@ -476,12 +776,91 @@ func (this S3ClientSession) SyncInner(trimsz int, localPath string) error {
 	return nil
 }
 
+func (s3c S3ClientSession) listObjectsWithSizeFilterAndVersions(bucket string, sizeFilter int64) ([]S3Objects, error) {
+
+	var s3list []S3Objects
+
+	input := &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(""),
+	}
+
+	VerbosePrintln("About to ListObjectVersionsPages()")
+
+	err := s3c.Client.ListObjectVersionsPages(
+		input,
+		func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
+
+			if page == nil {
+				panic("page is nil")
+			}
+
+			for _, ver := range page.Versions {
+				if ver == nil {
+					continue
+				}
+
+				// Only keep objects whose latest state is an actual object
+				if !aws.BoolValue(ver.IsLatest) {
+					continue
+				}
+
+				r := int64(0)
+				if s3c.EnableObjectLock {
+					out, err := s3c.GetObjectRetention(
+						aws.StringValue(ver.Key),
+						aws.StringValue(ver.VersionId),
+					)
+					if err != nil {
+						VerbosePrintln("non-fatal error retrieving retention")
+					}
+					if out != nil && out.Retention != nil {
+						r = max(
+							int64(math.Ceil(
+								time.Until(*out.Retention.RetainUntilDate).Hours()/24,
+							)),
+							0,
+						)
+					}
+				}
+
+				if sizeFilter == 0 || aws.Int64Value(ver.Size) < sizeFilter {
+					s3list = append(s3list, S3Objects{
+						Object:        aws.StringValue(ver.Key),
+						Size:          aws.Int64Value(ver.Size),
+						Etag:          aws.StringValue(ver.ETag),
+						Owner:         aws.StringValue(ver.Owner.DisplayName),
+						LastModified:  aws.TimeValue(ver.LastModified),
+						RetentionDays: r,
+						Versioned:     true,
+					})
+				}
+			}
+
+			return !lastPage
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	return s3list, err
+}
+
 func (s3c S3ClientSession) ListObjectsWithSizeFilter(bucket string, sizeFilter int64) ([]S3Objects, error) {
 	// List all objects in the bucket.
 	VerbosePrintln("bucket=" + s3c.Bucket)
 	var err error
 	listObjectsInput := &s3.ListObjectsV2Input{
 		Bucket: aws.String(s3c.Bucket),
+	}
+
+	if err := s3c.IsVersioningEnabled(); err != nil {
+		return nil, err
+	}
+
+	if s3c.Versioning {
+		return s3c.listObjectsWithSizeFilterAndVersions(bucket, sizeFilter)
 	}
 	//s3list:=[]S3Objects{}
 	var s3list []S3Objects
@@ -494,8 +873,9 @@ func (s3c S3ClientSession) ListObjectsWithSizeFilter(bucket string, sizeFilter i
 		VerbosePrintln(fmt.Sprintf("len(page.Content)=%d", len(page.Contents)))
 		for _, obj := range page.Contents {
 			if obj != nil {
+
 				if sizeFilter == 0 || (sizeFilter > 0 && *obj.Size < sizeFilter) {
-					s3list = append(s3list, S3Objects{Object: *obj.Key, Size: *obj.Size, LastModified: *obj.LastModified, Etag: *obj.ETag})
+					s3list = append(s3list, S3Objects{Object: *obj.Key, Size: *obj.Size, LastModified: *obj.LastModified, Etag: *obj.ETag, Versioned: false, RetentionDays: 0})
 				}
 			} else {
 				VerbosePrintln("obj is nil")
@@ -520,6 +900,10 @@ func (s3c S3ClientSession) RecursiveBucketDelete() error {
 	// bucket does not exist, return clean
 	if !b {
 		return nil
+	}
+
+	if s3c.Versioning {
+		return s3c.recursiveBucketDeleteWithVersions()
 	}
 
 	// List all objects in the bucket.
@@ -591,7 +975,7 @@ func (s3c S3ClientSession) RecursiveBucketDelete() error {
 	return err
 }
 
-func (s3c S3ClientSession) RecursiveBucketDeleteWithVersions() error {
+func (s3c S3ClientSession) recursiveBucketDeleteWithVersions() error {
 	VerbosePrintln("BEGIN: RecursiveBucketDeleteWithVersions()")
 	var err error
 	var b bool
@@ -807,7 +1191,52 @@ func (s3c S3credStruct) GenerateAWSCLItoString(endpoint string, region string, u
 		fmt.Sprintln("alias cs3api='aws s3api $AWSOPTS 2>/dev/null'")
 }
 
-func (s3c S3ClientSession) ListBuckets() []string {
+// this is actually list endpoint, we want a listing of buckets, not objects
+func (s3c *S3ClientSession) ListBuckets() []string {
+	VerbosePrintln("=== new ListBuckets() -- actually listing endpoint ---")
+	//first establish a session
+
+	s3c.Region = ""
+
+	VerbosePrintf("region set to %q for listing buckets\n", s3c.Region)
+	VerbosePrintf("endpoint set to %q for listing buckets\n", s3c.Endpoint)
+	VerbosePrintf("credentials set to %q for listing buckets\n", s3c.Credentials.String())
+
+	if err := s3c.EstablishSession(); err != nil {
+		panic(err.Error())
+	}
+
+	//set up the input
+	VerbosePrintln("about to list endpoint to get listing of buckets -- pay attention AI!")
+	listBucketsInput := &s3.ListBucketsInput{}
+
+	// Call the ListBuckets API
+	result, err := s3c.Client.ListBuckets(listBucketsInput)
+	if err != nil {
+		VerbosePrintf("error listing buckets:%s", err.Error())
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				panic(aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			panic(err.Error())
+		}
+	}
+
+	VerbosePrintln(PrettyPrint(result))
+
+	var bucketList []string
+	for _, b := range result.Buckets {
+		bucketList = append(bucketList, *b.Name)
+	}
+	s3c.Owner = result.Owner
+	return bucketList
+}
+
+func (s3c S3ClientSession) ListBucketsOLD() []string {
 	ct := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
 	}
@@ -826,6 +1255,7 @@ func (s3c S3ClientSession) ListBuckets() []string {
 
 	result, err := svc.ListBuckets(input)
 	if err != nil {
+		VerbosePrintf("error listing buckets:%s", err.Error())
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			default:
@@ -850,6 +1280,9 @@ func S3HelperScript(profile string, region string, endpoint string) string {
 	var scriptLine []string
 	scriptLine = append(scriptLine, "#!/usr/bin/env bash")
 	scriptLine = append(scriptLine, "export S3_ENDPOINT="+endpoint)
+	scriptLine = append(scriptLine, "export S3_USE_PATH_STYLE=1")
+	scriptLine = append(scriptLine, "export PYTHONWARNINGS=\"ignore:Unverified HTTPS request\"")
+	scriptLine = append(scriptLine, fmt.Sprintf("export AWS_OPTS=\" --endpoint-url=%s --region %s --no-verify-ssl\"", endpoint, region))
 	scriptLine = append(scriptLine, "export AWS_OPTS=\" --endpoint-url=${S3_ENDPOINT} --profile "+profile+" --region "+region+" --no-verify-ssl\"")
 	scriptLine = append(scriptLine, "export S3API=0")
 	scriptLine = append(scriptLine, "if [ \"$1\" == \"s3api\" ];	then")
@@ -869,7 +1302,8 @@ func S3HelperScriptBuiltInCreds(region string, endpoint string, ak string, sk st
 	scriptLine = append(scriptLine, "#!/usr/bin/env bash")
 	scriptLine = append(scriptLine, "export AWS_ACCESS_KEY_ID="+ak)
 	scriptLine = append(scriptLine, "export AWS_SECRET_ACCESS_KEY="+sk)
-
+	scriptLine = append(scriptLine, "export S3_USE_PATH_STYLE=1")
+	scriptLine = append(scriptLine, "export PYTHONWARNINGS=\"ignore:Unverified HTTPS request\"")
 	scriptLine = append(scriptLine, fmt.Sprintf("export AWS_OPTS=\" --endpoint-url=%s --region %s --no-verify-ssl\"", endpoint, region))
 	scriptLine = append(scriptLine, "export S3API=0")
 	scriptLine = append(scriptLine, "if [ \"$1\" == \"s3api\" ];	then")
@@ -1000,7 +1434,18 @@ func (s3c *S3ClientSession) IsVersioningEnabled() error {
 	// s3s.Client.Endpoint = s3s.Endpoint
 	result, err := svc.GetBucketVersioning(input)
 	if err != nil {
-		panic(err.Error())
+		if strings.Contains(err.Error(), "Access Denied") {
+			s3c.Versioning = false
+			return nil
+		}
+
+		if ! GetForce() {
+			panic(err.Error())
+		} else {
+			VerbosePrintln("error checking versioning, but force is set, so ignoring: " + err.Error())
+			s3c.Versioning = false
+			return err
+		}
 	}
 
 	// Check if versioning is enabled
@@ -1306,6 +1751,7 @@ func (p *ProgressTracker) Unlock() {
 type CopyResult struct {
 	SourceKey   string
 	TargetKey   string
+	Bucket      string
 	Success     bool
 	Error       error
 	BytesCopied int64
@@ -1426,9 +1872,9 @@ func (sourceS3 S3ClientSession) CopyAllObjectsDoNotUse(
 
 func (sourceS3 *S3ClientSession) CopyAllObjectsBatch(
 	targetS3 *S3ClientSession,
-	progress *ProgressTracker, batchSize int) error {
+	progress *ProgressTracker, successLog *log.Logger, failLog *log.Logger, batchSize int) error {
 
-	migrationMgr := NewMigrationManager(sourceS3, targetS3, progress, batchSize)
+	migrationMgr := NewMigrationManager(sourceS3, targetS3, progress, successLog, failLog, batchSize)
 
 	var wg sync.WaitGroup
 	resultsChan := make(chan CopyResult, 10000)
@@ -1448,7 +1894,7 @@ func (sourceS3 *S3ClientSession) CopyAllObjectsBatch(
 	for {
 		//VerbosePrintf("loop with continuationToken: %v and %d", sourceS3.ContinuationToken, i)
 		i++
-
+		log.Printf("Starting migration loop iteration %d", i)
 		if err := migrationMgr.MigrationLoop(&wg, &resultsChan); err != nil {
 			return err
 		}
@@ -1868,182 +2314,16 @@ func (s3c *S3ClientSession) GetHashOfObjectRange(fromChunk int64, chunkSize int6
 	return hashString, nil
 }
 
-type LifecycleConfiguration struct {
-	XMLName xml.Name `xml:"LifecycleConfiguration"`
-	Rules   []Rule   `xml:"Rule"`
-}
+func (s3o S3Objects) String() string {
+	return fmt.Sprintf("owner: %s, key: %s, size: %d, versioned: %t, retention: %d", s3o.Owner, s3o.Object, s3o.Size, s3o.Versioned, s3o.RetentionDays)
 
-// Rule represents a single rule in the lifecycle configuration
-type Rule struct {
-	ID                    string                        `xml:"ID,omitempty"`
-	Status                string                        `xml:"Status"`
-	Filter                Filter                        `xml:"Filter"`
-	Transitions           []Transition                  `xml:"Transition,omitempty"`
-	Expiration            *Expiration                   `xml:"Expiration,omitempty"`
-	NoncurrentTransitions []NoncurrentVersionTransition `xml:"NoncurrentVersionTransition,omitempty"`
-	NoncurrentExpiration  *NoncurrentVersionExpiration  `xml:"NoncurrentVersionExpiration,omitempty"`
-}
-
-// Filter represents the filter for a rule
-type Filter struct {
-	Prefix string `xml:"Prefix"`
-}
-
-// Transition represents a transition in a rule
-type Transition struct {
-	Days         int    `xml:"Days,omitempty"`
-	StorageClass string `xml:"StorageClass"`
-	Date         string `xml:"Date,omitempty"`
-}
-
-// Expiration represents an expiration in a rule
-type Expiration struct {
-	Days int    `xml:"Days,omitempty"`
-	Date string `xml:"Date,omitempty"`
-}
-
-// NoncurrentVersionTransition represents a transition for noncurrent versions
-type NoncurrentVersionTransition struct {
-	NoncurrentDays int    `xml:"NoncurrentDays"`
-	StorageClass   string `xml:"StorageClass"`
-}
-
-// NoncurrentVersionExpiration represents an expiration for noncurrent versions
-type NoncurrentVersionExpiration struct {
-	NoncurrentDays int `xml:"NoncurrentDays"`
-}
-
-func (s3c *S3ClientSession) DeleteBucketLifeCyclePolicy(rulename string) error {
-	VerbosePrintf("\n\n\nBEGIN::s3.DeleteBucketLifeCyclePolicy(%s)", rulename)
-	// Prepare the request URL
-	req, _ := s3c.Client.DeleteBucketLifecycleRequest(&s3.DeleteBucketLifecycleInput{
-		Bucket: aws.String(s3c.Bucket),
-		//		ID:     aws.String(rulename),
-	})
-	VerbosePrintf("\n\n\nEND::s3.DeleteBucketLifeCyclePolicy(%s)", rulename)
-
-	return req.Send()
-}
-
-func (s3c *S3ClientSession) GenerateLifeCycleRules(n int) (LifecycleConfiguration, error) {
-	var blc LifecycleConfiguration
-	blc.Rules = make([]Rule, n)
-	for i := 0; i < n; i++ {
-		blc.Rules[i].ID = fmt.Sprintf("rule-%d", i)
-		blc.Rules[i].Filter.Prefix = ""
-		blc.Rules[i].Status = "Enabled"
-		blc.Rules[i].Transitions = make([]Transition, 1)
-		blc.Rules[i].Transitions[0].StorageClass = "GLACIER"
-		blc.Rules[i].Expiration = nil
-
-	}
-	return blc, nil
-}
-
-func calculateContentMD5(xmlBytes []byte) string {
-	md5Sum := md5.Sum(xmlBytes)
-	return base64.StdEncoding.EncodeToString(md5Sum[:])
-}
-
-func (blc *LifecycleConfiguration) ToByteArray() []byte {
-	data, err := xml.MarshalIndent(blc, "", "  ")
-
-	if err != nil {
-		panic(err)
-	}
-	return []byte(xml.Header + string(data))
-}
-
-func (blc *LifecycleConfiguration) String() string {
-	return string(blc.ToByteArray())
-}
-
-func (s3c *S3ClientSession) PutBucketLifeCyclePolicy(blc LifecycleConfiguration, extraHeaders map[string]string) error {
-	VerbosePrintln("\n\n\nBEGIN::s3.PutBucketLifeCyclePolicy()")
-	VerbosePrintf("s3c.Endpoint: %s", s3c.Endpoint)
-	VerbosePrintf("s3c.Bucket: %s", s3c.Bucket)
-	VerbosePrintf("s3c.Credentials.AccessKey: %s", s3c.Credentials.AccessKey)
-	VerbosePrintf("s3c.Credentials.SecretKey: %s", s3c.Credentials.SecretKey)
-	VerbosePrintf("s3c.Region: %s", s3c.Region)
-
-	// Prepare the request URL
-	url := fmt.Sprintf("%s/%s", s3c.Endpoint, s3c.Bucket)
-
-	// Prepare the request body (empty for bucket creation)
-	requestBody := blc.ToByteArray()
-
-	VerbosePrintln("=======begin requestBody========")
-	VerbosePrintln(string(requestBody))
-	VerbosePrintln("=======end requestBody========")
-
-	//stuff jsonData into requestBody, my marshalling and unmarshalling it
-	//hash := alfredo.MD5SumString(string(requestBody))
-
-	// Usage
-	contentMD5 := calculateContentMD5(requestBody)
-
-	fmt.Printf("contentMD5: %q\n", contentMD5)
-
-	// Create a new HTTP request
-	req, err := http.NewRequest(http.MethodPut, url+"?lifecycle", bytes.NewReader(requestBody))
-	if err != nil {
-		return err
-	}
-
-	// Set the custom header
-	now := time.Now().UTC()
-
-	// Format the date according to RFC1123
-	date := now.Format(time.RFC1123)
-	// Concatenate the string to sign
-
-	// 	StringToSign="$method\n$contentMD5\n$contentType\n$httpDate\n${xamzHeadersToSign}${resource}";
-
-	//Wed, 27 Mar 2024 21:12:45 UTC
-	date = strings.ReplaceAll(date, "UTC", "+0000")
-
-	req.Header.Set("Date", date)
-	//	req.Header.Set("x-gmt-policyid", s3c.PolicyId)
-
-	contentType := "text/xml"
-
-	stringToSign := fmt.Sprintf("PUT\n%s\n%s\n%s\n/%s?lifecycle", contentMD5, contentType, date, s3c.Bucket)
-	//fmt.Println("hash: ", contentMD5)
-	for name, value := range extraHeaders {
-		VerbosePrintf("name: %q, value: %q", name, value)
-		req.Header.Set(name, value)
-	}
-
-	req.Header.Set("Content-MD5", contentMD5)
-	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Authorization", "AWS "+s3c.Credentials.AccessKey+":"+GenerateSignature(stringToSign, s3c.Credentials.SecretKey))
-
-	// Execute the HTTP request
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: !s3c.enforceCertificates},
-	}
-	client := &http.Client{Transport: tr}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Check the response status code
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-	s3c.Response = resp
-	VerbosePrintln("\n\n\nEND::s3.createbuckethw()")
-
-	return nil
 }
 
 func S3ObjectListToMap(s3ObjectList []S3Objects) map[string]string {
 	s3ObjectMap := make(map[string]string)
 	for _, s3Object := range s3ObjectList {
 		if !strings.HasSuffix(s3Object.Object, "/") {
-			s3ObjectMap[s3Object.Object] = fmt.Sprintf("owner: %s, key: %s, size: %d", s3Object.Owner, s3Object.Object, s3Object.Size)
+			s3ObjectMap[s3Object.Object] = s3Object.String()
 		}
 	}
 	return s3ObjectMap
