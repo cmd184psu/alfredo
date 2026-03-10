@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/cmd184psu/alfredo"
 )
 
 // TaskExecutor executes tasks based on their type
@@ -25,14 +27,14 @@ func NewTaskExecutor(db *DB, workerID string) *TaskExecutor {
 // Execute runs a task and records the results
 func (te *TaskExecutor) Execute(twe *TaskWithExecution) error {
 	task := twe.Task
-	
+
 	// Determine retry count
 	retryCount := 0
 	if twe.LastExecution != nil && twe.LastExecution.Status == "failed" {
 		retryCount = twe.LastExecution.RetryCount
 	}
 
-	fmt.Printf("[%s] Executing task: %s (attempt %d/%d)\n", 
+	fmt.Printf("[%s] Executing task: %s (attempt %d/%d)\n",
 		te.workerID, task.Name, retryCount+1, task.MaxRetries+1)
 
 	// Create execution record
@@ -42,7 +44,7 @@ func (te *TaskExecutor) Execute(twe *TaskWithExecution) error {
 	}
 
 	startTime := time.Now()
-	
+
 	// Execute the task based on type
 	var execErr error
 	switch task.TaskType {
@@ -66,10 +68,10 @@ func (te *TaskExecutor) Execute(twe *TaskWithExecution) error {
 		status = "failed"
 		errStr := execErr.Error()
 		errorMsg = &errStr
-		fmt.Printf("[%s] Task %s failed: %v (duration: %v)\n", 
+		fmt.Printf("[%s] Task %s failed: %v (duration: %v)\n",
 			te.workerID, task.Name, execErr, duration)
 	} else {
-		fmt.Printf("[%s] Task %s completed successfully (duration: %v)\n", 
+		fmt.Printf("[%s] Task %s completed successfully (duration: %v)\n",
 			te.workerID, task.Name, duration)
 	}
 
@@ -186,34 +188,28 @@ func (te *TaskExecutor) executeScript(task Task) error {
 
 // executeShell executes a shell command
 func (te *TaskExecutor) executeShell(task Task) error {
-    var args map[string]interface{}
-    if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
-        return fmt.Errorf("invalid args JSON: %w", err)
-    }
-    
-    shellCmd, ok := args["shell"].(string)
-    if !ok {
-        return fmt.Errorf("missing 'shell' in args")
-    }
-    
-    // DEBUG: Log what we're about to execute
-    fmt.Printf("[DEBUG] Shell command: %s\n", shellCmd)
-    
-    workDir := "/"
-    if wd, ok := args["workdir"].(string); ok {
-        workDir = wd
-    }
-    
-    fmt.Printf("[DEBUG] Working directory: %s\n", workDir)
-    
-    cmd := exec.Command("/bin/bash", "-c", shellCmd)
-    cmd.Dir = workDir
-    cmd.Stdout = os.Stdout
-    cmd.Stderr = os.Stderr
-    
-    err := cmd.Run()
-    if err != nil {
-        fmt.Printf("[DEBUG] Command failed: %v\n", err)
-    }
-    return err
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
+		return fmt.Errorf("invalid args JSON: %w", err)
+	}
+
+	shellCmd, ok := args["shell"].(string)
+	if !ok {
+		return fmt.Errorf("missing 'shell' in args")
+	}
+
+	// DEBUG: Log what we're about to execute
+	fmt.Printf("[DEBUG] Shell command: %s\n", shellCmd)
+
+	workDir := "/"
+	if wd, ok := args["workdir"].(string); ok {
+		workDir = wd
+	}
+
+	fmt.Printf("[DEBUG] Working directory: %s\n", workDir)
+
+	exe := alfredo.NewCLIExecutor().AsLongRunning().DumpOutput().WithSudo(true).WithCommand(shellCmd)
+
+	return exe.Execute()
+
 }

@@ -17,16 +17,17 @@ import (
 )
 
 type MigrationMgrStruct struct {
-	SourceS3   *S3ClientSession
-	TargetS3   *S3ClientSession
-	Progress   *ProgressTracker
-	ErrorMsg   string
-	SourceHead *s3.HeadObjectOutput
-	TargetHead *s3.HeadObjectOutput
-	output     *s3.ListObjectsV2Output
-	WorkerPool chan struct{}
-	SuccessLog *log.Logger
-	FailLog    *log.Logger
+	SourceS3                  *S3ClientSession
+	TargetS3                  *S3ClientSession
+	Progress                  *ProgressTracker
+	ErrorMsg                  string
+	SourceHead                *s3.HeadObjectOutput
+	TargetHead                *s3.HeadObjectOutput
+	output                    *s3.ListObjectsV2Output
+	WorkerPool                chan struct{}
+	SuccessLog                *log.Logger
+	FailLog                   *log.Logger
+	UseSourceAsPrefixOnTarget bool // if true, use source bucket name as prefix on target bucket
 }
 
 func (mgr *MigrationMgrStruct) Lock() {
@@ -51,6 +52,7 @@ func (mgr *MigrationMgrStruct) DeepCopy() *MigrationMgrStruct {
 	newMgr.WorkerPool = make(chan struct{}, mgr.SourceS3.GetConcurrency())
 	newMgr.SuccessLog = mgr.SuccessLog
 	newMgr.FailLog = mgr.FailLog
+	newMgr.UseSourceAsPrefixOnTarget = mgr.UseSourceAsPrefixOnTarget
 	return &newMgr
 }
 
@@ -73,6 +75,11 @@ func NewMigrationManager(sourceS3 *S3ClientSession, targetS3 *S3ClientSession, p
 		FailLog:    failLog,
 		WorkerPool: make(chan struct{}, sourceS3.GetConcurrency()),
 	}
+}
+
+func (mgr *MigrationMgrStruct) WithUseSourceAsPrefixOnTarget(usePrefix bool) *MigrationMgrStruct {
+	mgr.UseSourceAsPrefixOnTarget = usePrefix
+	return mgr
 }
 
 func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *chan CopyResult) error {
@@ -110,6 +117,9 @@ func (mgr *MigrationMgrStruct) MigrationLoop(wg *sync.WaitGroup, ResultsChan *ch
 		mgr.Unlock()
 		newMgr.SourceS3.ObjectKey = key
 		newMgr.TargetS3.ObjectKey = key
+		if mgr.UseSourceAsPrefixOnTarget {
+			newMgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + key
+		}
 		wg.Add(1)
 		go func(innerMgr *MigrationMgrStruct, objectSize int64) {
 			defer wg.Done()
@@ -248,6 +258,11 @@ func (mgr *MigrationMgrStruct) MigrationBatch(keys []string, wg *sync.WaitGroup,
 		newMgr.SourceS3.ObjectKey = key
 		newMgr.TargetS3.ObjectKey = key
 
+		if mgr.UseSourceAsPrefixOnTarget {
+			newMgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + key
+		}
+
+
 		//fmt.Println("MigrationBatch::(launch go task) workking on key=", key, " i=", i)
 		wg.Add(1)
 		go func(innerMgr *MigrationMgrStruct, objectSize int64) {
@@ -350,6 +365,9 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsMPU() error {
 	VerbosePrintf("(ALIVE! 1) CopyObjectBetweenBucketsMPU(...%s ==> %s)\n", mgr.SourceS3.ObjectKey, mgr.TargetS3.ObjectKey)
 	if len(mgr.TargetS3.ObjectKey) == 0 {
 		mgr.TargetS3.ObjectKey = mgr.SourceS3.ObjectKey
+		if mgr.UseSourceAsPrefixOnTarget {
+			mgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + mgr.SourceS3.ObjectKey
+		}
 	}
 	// Get source object details
 	// For large files, use multipart upload with streaming
@@ -559,6 +577,9 @@ func (mgr *MigrationMgrStruct) CopyObjectBetweenBucketsRegular() error {
 	tgtKey := mgr.TargetS3.ObjectKey
 	if len(mgr.TargetS3.ObjectKey) == 0 {
 		mgr.TargetS3.ObjectKey = mgr.SourceS3.ObjectKey
+		if mgr.UseSourceAsPrefixOnTarget {
+			mgr.TargetS3.ObjectKey = mgr.SourceS3.Bucket + "/" + mgr.SourceS3.ObjectKey
+		}
 	}
 	// Get the object
 	getOutput, err := mgr.SourceS3.Client.GetObjectWithContext(mgr.SourceS3.ctx, &s3.GetObjectInput{

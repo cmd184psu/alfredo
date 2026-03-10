@@ -763,13 +763,20 @@ func WriteLineToFile(filePath, line string) error {
 }
 
 func BoolColor(b bool) string {
+	if !strings.EqualFold(os.Getenv("TERM"), "xterm-256color") {
+		if b {
+			return "true "
+		} else {
+			return "false"
+		}
+	}
 	const (
 		greenBright = "\033[92m"
 		red         = "\033[31m"
 		reset       = "\033[0m"
 	)
 	if b {
-		return fmt.Sprintf("%s✅ true%s", greenBright, reset)
+		return fmt.Sprintf("%s✅ true %s", greenBright, reset)
 	}
 	return fmt.Sprintf("%s❌ false%s", red, reset)
 }

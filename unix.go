@@ -962,6 +962,9 @@ func CapturePids(main string, hint string) ([]int, error) {
 	}
 	var pidList []int
 	for _, line := range lines {
+		if !strings.Contains(line, hint) {
+			continue
+		}
 		VerbosePrintf("line=%s", line)
 		fields := strings.Fields(line)
 		if len(fields) >= 3 {

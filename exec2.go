@@ -309,6 +309,9 @@ func (c *CLIExecutor) Execute() error {
 		if len(c.sshHost) > 0 {
 			// For SSH, we need to properly escape the directory path
 			escapedDir := strings.ReplaceAll(c.directory, "'", "'\"'\"'")
+			if c.useSudo {
+				c.command = "sudo " + c.command
+			}
 			newcommand := fmt.Sprintf("cd '%s' && %s", escapedDir, c.command)
 			c.command = newcommand
 		}
@@ -333,6 +336,7 @@ func (c *CLIExecutor) Execute() error {
 
 			arglist = append([]string{"-vvv"}, arglist...)
 		}
+		arglist = append([]string{"-tt"}, arglist...)
 		if !c.secureMode {
 			VerbosePrintln("using insecure ssh method (no host key checking)")
 			arglist = append([]string{"-o", "StrictHostKeyChecking=no",
@@ -376,6 +380,19 @@ func (c *CLIExecutor) Execute() error {
 		}
 	}
 	cmd.Env = os.Environ()
+	if os.Getenv("PATH") == "" {
+		cmd.Env = append(cmd.Env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	}
+	if GetDebug() {
+		cmd.Env = append(cmd.Env, "DEBUG=1")
+	}
+	if GetVerbose() {
+		cmd.Env = append(cmd.Env, "VERBOSE=1")
+	}
+	if GetForce() {
+		cmd.Env = append(cmd.Env, "FORCE=1")
+	}
+
 	if GetDebug() {
 		VerbosePrintf("exec2.go:: (3) command: %s\n", c.command)
 	}
@@ -981,4 +998,57 @@ func (exe *CLIExecutor) CheckAndKillProcess(procName string) error {
 	}
 	fmt.Println("did not find process ", procName)
 	return nil
+}
+
+func (exe *CLIExecutor) BackgroundCommand(outputFile string, countdown bool) int {
+
+	arglist := make([]string, 0)
+	oldargs := strings.Split(exe.command, " ")
+	for i := 0; i < len(oldargs); i++ {
+		if oldargs[i] == "-background" || oldargs[i] == "--background" || oldargs[i] == "-bg" || oldargs[i] == "--bg" || oldargs[i] == "-bkg" {
+			continue
+		}
+
+		arglist = append(arglist, oldargs[i])
+	}
+	//	arglist = append(arglist, "-inner")
+	cmd := exec.Command("bash", "-c", strings.Join(arglist, " "))
+	cmd.Env = os.Environ()
+
+	outFile, outFileerr := os.Create(outputFile + ".stdout")
+	if outFileerr != nil {
+		fmt.Printf("Error creating output file %v\n", outFileerr)
+		os.Exit(1)
+	}
+	defer outFile.Close()
+	errFile, errFileerr := os.Create(outputFile + ".stderr")
+	if errFileerr != nil {
+		fmt.Printf("Error creating output file %v\n", errFileerr)
+		os.Exit(1)
+	}
+	defer errFile.Close()
+
+	cmd.Dir = exe.directory
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if countdown || GetDebug() {
+		fmt.Println("Relaunching in the background... in ")
+		fmt.Println("3")
+		time.Sleep(time.Second)
+		fmt.Println("2")
+		time.Sleep(time.Second)
+		fmt.Println("1")
+		time.Sleep(time.Second)
+		fmt.Println("GO!")
+		time.Sleep(time.Second)
+	}
+	if err := cmd.Start(); err != nil {
+		panic(err.Error())
+	}
+	return cmd.Process.Pid
+
 }

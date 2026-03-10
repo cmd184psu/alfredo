@@ -255,11 +255,11 @@ LIMIT 1;
 // `
 
 func (db *DB) GetNextTask() (*TaskWithExecution, error) {
-	fmt.Println("BEGIN GetNextTask()")
-	defer fmt.Println("END GetNextTask()")
-	alfredo.SetVerbose(true)
+	alfredo.VerbosePrintln("BEGIN GetNextTask()")
+	defer alfredo.VerbosePrintln("END GetNextTask()")
+	//alfredo.SetVerbose(true)
 	if err := db.Query(getNextTaskFmt); err != nil {
-		fmt.Println("[db] GetNextTask: query error:", err)
+		alfredo.VerbosePrintf("[db] GetNextTask: query error: %s\n", err)
 		panic("query error: " + err.Error())
 		return nil, err
 	}
@@ -375,8 +375,8 @@ SELECT changes();
 `
 
 func (db *DB) RecordMetric(taskID int64, durationMs int64, status string) error {
-	fmt.Println("BEGIN RecordMetric()")
-	defer fmt.Println("END RecordMetric()")
+	alfredo.VerbosePrintln("BEGIN RecordMetric()")
+	defer alfredo.VerbosePrintln("END RecordMetric()")
 	payload := fmt.Sprintf(recordMetricFmt,
 		taskID,
 		durationMs,

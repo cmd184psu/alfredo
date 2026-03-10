@@ -78,6 +78,14 @@ func GetFileSize(localFile string) (int64, error) {
 	return fileInfo.Size(), nil
 }
 
+func GetFileSizeEasy(localFile string) int64 {
+	s, err := GetFileSize(localFile)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get file size for %s: %v", localFile, err))
+	}
+	return s
+}
+
 func SecondsToTimestamp(seconds int64) string {
 	// Convert seconds to time.Time
 	date := time.Unix(seconds, 0)
@@ -119,16 +127,16 @@ func (et EpochTime) MarshalJSON() ([]byte, error) {
 }
 
 func (et *EpochTime) SetTime(t time.Time) {
-    et.Time = t
+	et.Time = t
 }
 func (et *EpochTime) Now() {
-    et.Time = time.Now()
+	et.Time = time.Now()
 }
 
 func (et *EpochTime) GetTime() time.Time {
-    return et.Time
+	return et.Time
 }
 
 func EpochTimeFromTime(t time.Time) EpochTime {
-    return EpochTime{Time: t}
+	return EpochTime{Time: t}
 }
