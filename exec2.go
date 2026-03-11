@@ -9,13 +9,17 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/google/shlex"
 )
 
 type CLIExecutor struct {
 	command           string
+	subCommand        string
 	requestPayload    string
 	sshHost           string
 	sshKey            string
@@ -31,19 +35,26 @@ type CLIExecutor struct {
 	dump              bool
 	debugSSH          bool
 	ignoreExitCodeOne bool
+	ctx               context.Context
+	secureMode        bool //opt out
+	useSudo           bool
 }
 
-const default_timeout = 5 * time.Second
+const DefaultExeTimeout = 5 * time.Second
 
 func NewCLIExecutor() *CLIExecutor {
 	ex := &CLIExecutor{}
-	t := default_timeout
-	//ex.SetTimeout(t)
-	return ex.WithTimeout(t)
+	//from now on, all instances will be long running by default
+	return ex.AsLongRunning()
 }
 
 func (c *CLIExecutor) WithCommand(command string) *CLIExecutor {
 	c.command = command
+	return c
+}
+
+func (c *CLIExecutor) WithSubCommand(subcommand string) *CLIExecutor {
+	c.subCommand = subcommand
 	return c
 }
 
@@ -59,10 +70,27 @@ func (c *CLIExecutor) WithSSH(host, key, user string) *CLIExecutor {
 	return c
 }
 
+func (c *CLIExecutor) HasSSH() bool {
+	return len(c.sshHost) != 0
+}
+
+func (c *CLIExecutor) DropSSH() *CLIExecutor {
+	c.sshHost = ""
+	c.sshKey = ""
+	c.sshUser = ""
+	return c
+}
+
 func (c *CLIExecutor) WithSSHStruct(s SSHStruct) *CLIExecutor {
 	c.sshHost = s.Host
 	c.sshKey = s.Key
 	c.sshUser = s.User
+	//	c.insecureMode = s.Insecure
+	return c
+}
+
+func (c *CLIExecutor) WithContext(ctx context.Context) *CLIExecutor {
+	c.ctx = ctx
 	return c
 }
 
@@ -71,11 +99,21 @@ func (c *CLIExecutor) GetSSH() SSHStruct {
 		Host: c.sshHost,
 		Key:  c.sshKey,
 		User: c.sshUser,
+		//		Insecure: c.insecureMode,
 	}
 }
 
 func (c *CLIExecutor) WithSSHDebug(b bool) *CLIExecutor {
 	c.debugSSH = b
+	return c
+}
+
+func (c *CLIExecutor) InsecureMode() *CLIExecutor {
+	c.secureMode = false
+	return c
+}
+func (c *CLIExecutor) SecureMode() *CLIExecutor {
+	c.secureMode = true
 	return c
 }
 
@@ -96,6 +134,11 @@ func (c *CLIExecutor) WithTimeout(timeout time.Duration) *CLIExecutor {
 		return c
 	}
 	c.timeout = timeout
+	return c
+}
+
+func (c *CLIExecutor) WithSudo(s bool) *CLIExecutor {
+	c.useSudo = s
 	return c
 }
 
@@ -142,6 +185,13 @@ func (c *CLIExecutor) GetResponseBody() string {
 	return c.responseBody
 }
 
+func (c *CLIExecutor) GetResponseBodyAsSlice() []string {
+	body := c.GetResponseBody()
+	if len(body) == 0 {
+		return []string{}
+	}
+	return strings.Split(body, "\n")
+}
 func (c *CLIExecutor) WithTrimWhiteSpace(trim bool) *CLIExecutor {
 	c.trimWhiteSpace = trim
 	return c
@@ -169,12 +219,28 @@ func (c *CLIExecutor) GetCli() string {
 		if len(c.sshUser) == 0 {
 			c.sshUser = os.Getenv("USER")
 		}
-		return fmt.Sprintf("/usr/bin/ssh -i %s %s@%s %q", ExpandTilde(c.sshKey), c.sshUser, c.sshHost, c.command)
+		return fmt.Sprintf("/usr/bin/ssh -i %s %s@%s %q", ExpandTilde(c.sshKey), c.sshUser, c.sshHost, c.GetCommandWithSub())
 	}
-	return c.command
+
+	return c.GetCommandWithSub()
+}
+
+func (c *CLIExecutor) GetCommandWithSub() string {
+	cmd := c.command
+	if len(c.subCommand) > 0 && strings.Contains(c.command, "[SUB]") {
+		//		fmt.Println("Replacing [SUB] in command")
+		cmd = strings.ReplaceAll(c.command, "[SUB]", "\""+c.subCommand+"\"")
+	}
+	if c.useSudo {
+		cmd = "sudo " + cmd
+	}
+	return cmd
 }
 
 func (c *CLIExecutor) GetCommand() string {
+	if c.useSudo {
+		return "sudo " + c.command
+	}
 	return c.command
 }
 
@@ -241,50 +307,95 @@ func (c *CLIExecutor) Execute() error {
 	}
 	if len(c.directory) > 0 {
 		if len(c.sshHost) > 0 {
-			newcommand := "cd " + c.directory + " && " + c.command
+			// For SSH, we need to properly escape the directory path
+			escapedDir := strings.ReplaceAll(c.directory, "'", "'\"'\"'")
+			if c.useSudo {
+				c.command = "sudo " + c.command
+			}
+			newcommand := fmt.Sprintf("cd '%s' && %s", escapedDir, c.command)
 			c.command = newcommand
 		}
 	}
 	VerbosePrintf("cwd: %s\n", cwd)
-	// if len(c.directory) > 0 {
-	// 	VerbosePrintf("want to chdir to %s\n", c.directory)
-	// } else {
-	// 	VerbosePrintf("don't change directories\n")
-	// }
 
-	// VerbosePrintf("ssh host= %s\n", c.sshHost)
-	// VerbosePrintf("ssh user= %s\n", c.sshUser)
-	// VerbosePrintf("ssh key= %s\n", c.sshKey)
-	// VerbosePrintf("command: %s\n", c.command)
-	// VerbosePrintf("args: %s\n", strings.Join(c.args, " "))
 	if len(c.sshUser) == 0 {
 		c.sshUser = os.Getenv("USER")
 	}
 
+	if c.ctx == nil {
+		c.ctx = context.Background()
+	}
+
 	if c.sshHost != "" {
+		arglist := []string{"-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.GetCommandWithSub()}
 		if c.debugSSH || GetDebug() {
 			fmt.Println("key=" + c.sshKey)
 			fmt.Println("user=" + c.sshUser)
 			fmt.Println("host=" + c.sshHost)
-			fmt.Println("commmand=" + c.command)
-			cmd = exec.Command("/usr/bin/ssh", "-vvv", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command)
-		} else {
-			cmd = exec.Command("/usr/bin/ssh", "-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.command)
+			fmt.Println("command=" + c.command)
+
+			arglist = append([]string{"-vvv"}, arglist...)
 		}
+		arglist = append([]string{"-tt"}, arglist...)
+		if !c.secureMode {
+			VerbosePrintln("using insecure ssh method (no host key checking)")
+			arglist = append([]string{"-o", "StrictHostKeyChecking=no",
+				"-o", "GlobalKnownHostsFile=/dev/null",
+				"-o", "LogLevel=ERROR",
+				"-o", "ControlMaster=no",
+				"-o", "ControlPath=none",
+				"-o", "ControlPersist=no",
+				"-o", "UserKnownHostsFile=/dev/null"}, arglist...)
+		}
+
+		cmd = exec.CommandContext(c.ctx, "/usr/bin/ssh", arglist...)
+
+		cmdtest := append([]string{"/usr/bin/ssh"}, arglist...)
+		VerbosePrintf("exec2.go:: full ssh command: %s\n", strings.Join(cmdtest, " "))
+
 	} else {
-		VerbosePrintf("command: %s\n", c.command)
-		split := strings.Split(c.command, " ")
-		if len(split) > 1 {
-			cmd = exec.Command(split[0], split[1:]...)
-		} else {
-			cmd = exec.Command(c.command)
+		VerbosePrintf("exec2.go:: command: %s\n", c.command)
+		VerbosePrintf("exec2.go:: (sub)command: %s\n", c.subCommand)
+
+		// Use shlex to properly parse shell-like arguments
+		args, err := shlex.Split(c.GetCommandWithSub())
+		if err != nil {
+			return fmt.Errorf("failed to parse command arguments: %w", err)
 		}
+
+		if len(args) == 0 {
+			return fmt.Errorf("no command provided after parsing")
+		}
+		if GetDebug() {
+			VerbosePrintf("exec2.go:: (2) command: %s\n", c.command)
+		}
+		if len(args) > 1 {
+			cmd = exec.CommandContext(c.ctx, args[0], args[1:]...)
+		} else {
+			cmd = exec.CommandContext(c.ctx, args[0])
+		}
+
 		if len(c.directory) > 0 {
 			cmd.Dir = c.directory
 		}
 	}
 	cmd.Env = os.Environ()
-	//VerbosePrintf("Changed directory to %s (After env xfer)", EatErrorReturnString(os.Getwd()))
+	if os.Getenv("PATH") == "" {
+		cmd.Env = append(cmd.Env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	}
+	if GetDebug() {
+		cmd.Env = append(cmd.Env, "DEBUG=1")
+	}
+	if GetVerbose() {
+		cmd.Env = append(cmd.Env, "VERBOSE=1")
+	}
+	if GetForce() {
+		cmd.Env = append(cmd.Env, "FORCE=1")
+	}
+
+	if GetDebug() {
+		VerbosePrintf("exec2.go:: (3) command: %s\n", c.command)
+	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	if c.captureStdout && !c.dump {
@@ -294,6 +405,11 @@ func (c *CLIExecutor) Execute() error {
 	} else if c.dump && c.captureStdout {
 		cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
 	}
+
+	if GetDebug() {
+		VerbosePrintf("exec2.go:: (4) command: %s\n", c.command)
+	}
+
 	if c.captureStderr && !c.dump {
 		cmd.Stderr = &stderrBuf
 	} else if c.dump && !c.captureStderr {
@@ -302,12 +418,21 @@ func (c *CLIExecutor) Execute() error {
 		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 	}
 
+	if GetDebug() {
+		VerbosePrintf("exec2.go:: (5) command: %s\n", c.command)
+	}
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		c.WithStatusCode(-1).WithResponseBody(err.Error())
+		VerbosePrintf("exec2.go:: (err=%s) command: %s\n", err.Error(), c.command)
+
 		return err
 	}
+	if GetDebug() {
 
+		VerbosePrintf("exec2.go:: (6) command: %s\n", c.command)
+	}
 	if c.requestPayload != "" {
 		go func() {
 			defer stdin.Close()
@@ -318,8 +443,15 @@ func (c *CLIExecutor) Execute() error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
+	if GetDebug() {
+		VerbosePrintf("exec2.go:: (7) command: %s\n", c.command)
+	}
 	done := make(chan error)
 	go func() {
+
+		if GetDebug() {
+			VerbosePrintf("exec2.go:: (8) command: %s\n", c.command)
+		}
 		done <- cmd.Run()
 	}()
 
@@ -327,9 +459,16 @@ func (c *CLIExecutor) Execute() error {
 		go c.showSpinner()
 	}
 
+	if GetDebug() {
+		VerbosePrintf("exec2.go:: (9) command: %s\n", c.command)
+	}
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+
+		if GetDebug() {
+			VerbosePrintf("exec2.go:: (10) command: %s\n", c.command)
+		}
 		<-sigChan
 		cancel()
 	}()
@@ -340,15 +479,22 @@ func (c *CLIExecutor) Execute() error {
 		if c.ignoreExitCodeOne {
 			if cmd.ProcessState.ExitCode() == 1 {
 				c.WithStatusCode(0)
+
+				if GetDebug() {
+					VerbosePrintf("exec2.go:: (normal termination; ignoring exit code 1) command: %s\n", c.command)
+				}
+
 				return nil
 			}
 		}
 
 		c.WithStatusCode(-1)
+		if GetDebug() {
+			VerbosePrintf("exec2.go:: (err(2)=%s) command: %s\n", ctx.Err().Error(), c.command)
+		}
 		return ctx.Err()
 	case err := <-done:
 		if err != nil {
-
 			if c.ignoreExitCodeOne && cmd.ProcessState.ExitCode() == 1 {
 				c.WithStatusCode(0)
 				err = nil
@@ -363,8 +509,14 @@ func (c *CLIExecutor) Execute() error {
 				output += stderrBuf.String()
 			}
 			c.WithStatusCode(-1).WithResponseBody(output)
-			// fmt.Println("err:", err)
-			// fmt.Println("output:", output)
+
+			if GetDebug() {
+				if err == nil {
+					VerbosePrintf("exec2.go:: (normal termination, ignoring exit code 1) command: %s\n", c.command)
+					return nil
+				}
+				VerbosePrintf("exec2.go:: (err(3)=%s) command: %s\n", err.Error(), c.command)
+			}
 			return err
 		}
 	}
@@ -379,12 +531,9 @@ func (c *CLIExecutor) Execute() error {
 	}
 
 	c.WithStatusCode(cmd.ProcessState.ExitCode()).WithResponseBody(output)
-	//fmt.Println("output: ", c.GetResponseBody())
-	//fmt.Println("len of output is: ", len(c.GetResponseBody()))
-	//VerbosePrintf("wd is %s", EatErrorReturnString(os.Getwd()))
-	//VerbosePrintf("reverting back to  %s", cwd)
-
-	//return os.Chdir(cwd)
+	if GetDebug() {
+		VerbosePrintf("exec2.go:: (normal termination) command: %s\n", c.command)
+	}
 	return nil
 }
 
@@ -561,4 +710,345 @@ func (c *CLIExecutor) NormalizeName(fuzzy string) error {
 	}
 	c.responseBody = result
 	return nil
+}
+
+func (c *CLIExecutor) CreateDirectory(dir string, chown string) error {
+	c.WithCommand(fmt.Sprintf("mkdir -p %s", dir)).AsLongRunning()
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to create directory %s: %s", dir, err.Error())
+	}
+	c.WithCommand(fmt.Sprintf("chmod 0755 %s", dir))
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to set permissions on directory %s: %s", dir, err.Error())
+	}
+	if len(chown) > 0 {
+		c.WithCommand(fmt.Sprintf("chown %s %s", chown, dir))
+		if err := c.Execute(); err != nil {
+			return fmt.Errorf("unable to set ownership on directory %s: %s", dir, err.Error())
+		}
+	}
+	return nil
+}
+
+func (c *CLIExecutor) TotalSpaceUsed(filter string) error {
+	c.AsLongRunning().WithCaptureStdout(true).WithCommand("df -B1 --output=used,target")
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to get total space used: %s", err.Error())
+	}
+
+	// Parse the output and extract the total space used
+	output := strings.TrimSpace(c.GetResponseBody())
+	lines := strings.Split(output, "\n")
+	totalSpaceUsed := int64(0)
+
+	VerbosePrintf("Found %d lines in df output", len(lines))
+
+	for _, line := range lines {
+		VerbosePrintf("Processing line: %s", line)
+		if strings.Contains("Used Mounted on", line) {
+			VerbosePrintf("Skipping header line: %s", line)
+			continue
+		}
+		if strings.Contains(line, filter) || len(filter) == 0 {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				used, err := strconv.ParseInt(parts[0], 10, 64)
+				if err != nil {
+					return fmt.Errorf("unable to parse used space: %s", err.Error())
+				}
+				totalSpaceUsed += used
+				VerbosePrintf("Total space used (filtered by '%s'): %d bytes", filter, totalSpaceUsed)
+			} else {
+				VerbosePrintf("Skipping line, not enough parts: %s", line)
+			}
+		} else {
+			VerbosePrintf("Skipping line, does not match filter '%s': %s", filter, line)
+		}
+	}
+	c.WithResponseBody(strconv.FormatInt(totalSpaceUsed, 10))
+	return nil
+}
+func (c *CLIExecutor) TotalSpaceAvailable(filter string) error {
+	c.AsLongRunning().WithCaptureStdout(true).WithCommand("df -B1 --output=avail,target")
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to get total space available: %s", err.Error())
+	}
+
+	// Parse the output and extract the total space available
+	output := strings.TrimSpace(c.GetResponseBody())
+	lines := strings.Split(output, "\n")
+	totalSpaceAvailable := int64(0)
+
+	VerbosePrintf("Found %d lines in df output", len(lines))
+
+	for _, line := range lines {
+		VerbosePrintf("Processing line: %s", line)
+		if strings.Contains("Avail Mounted on", line) {
+			VerbosePrintf("Skipping header line: %s", line)
+			continue
+		}
+		if strings.Contains(line, filter) || len(filter) == 0 {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				avail, err := strconv.ParseInt(parts[0], 10, 64)
+				if err != nil {
+					return fmt.Errorf("unable to parse available space: %s", err.Error())
+				}
+				totalSpaceAvailable += avail
+				VerbosePrintf("Total space available (filtered by '%s'): %d bytes", filter, totalSpaceAvailable)
+			} else {
+				VerbosePrintf("Skipping line, not enough parts: %s", line)
+			}
+		} else {
+			VerbosePrintf("Skipping line, does not match filter '%s': %s", filter, line)
+		}
+	}
+	c.WithResponseBody(strconv.FormatInt(totalSpaceAvailable, 10))
+	return nil
+}
+
+// if err := exe.CountDrivesOverThreshold(threshold, filter, &count); err != nil {
+func (c *CLIExecutor) CountDrivesOverThreshold(threshold int, filter string, count *int) error {
+	if threshold < 1 || threshold > 99 {
+		return fmt.Errorf("threshold must be between 1 and 99")
+	}
+	c.AsLongRunning().WithCaptureStdout(true).WithCommand("df -B1 --output=pcent,target")
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to get drive usage: %s", err.Error())
+	}
+
+	// Parse the output and count the drives over the threshold
+	output := strings.TrimSpace(c.GetResponseBody())
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, filter) || len(filter) == 0 {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				percent, err := strconv.Atoi(parts[0][:len(parts[0])-1]) // Remove the '%' sign
+				if err != nil {
+					return fmt.Errorf("unable to parse drive usage percent: %s", err.Error())
+				}
+				if percent > threshold {
+					(*count)++
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (c *CLIExecutor) GetResponseBodyAsInt64() int64 {
+	value, _ := strconv.ParseInt(strings.TrimSpace(c.GetResponseBody()), 10, 64)
+	return value
+}
+
+func (c *CLIExecutor) SSHKeyGen(keyFile string, bits int, passphrase string) *CLIExecutor {
+	if len(keyFile) == 0 {
+		panic("keyFile cannot be empty")
+	}
+	if bits < 1024 {
+		bits = 4096
+	}
+	return c.WithCommand("ssh-keygen -t rsa -b " + strconv.Itoa(bits) + " -f " + keyFile + " -N " + passphrase + " -q").AsLongRunning()
+}
+
+// func installPublicKey(user, host, publicKey string) error {
+// 	// Command to append key to authorized_keys on remote
+// 	cmd := exec.Command("ssh", fmt.Sprintf("%s@%s", user, host),
+// 		"mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '"+publicKey+"' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys")
+
+// 	var stderr bytes.Buffer
+// 	cmd.Stderr = &stderr
+
+// 	if err := cmd.Run(); err != nil {
+// 		return fmt.Errorf("failed to install public key: %v, stderr: %s", err, stderr.String())
+// 	}
+// 	return nil
+// }
+
+func (c *CLIExecutor) InstallPublicKeyFileToRemote(publicKeyFile string) error {
+	publicKey := string(EatErrorReturnBytes(os.ReadFile(publicKeyFile)))
+	return c.InstallPublicKeyToRemote(publicKey)
+}
+
+func (c *CLIExecutor) InstallPublicKeyToRemote(publicKey string) error {
+	c.WithCommand(fmt.Sprintf("echo '%s' >> ~/.ssh/authorized_keys", publicKey)).AsLongRunning()
+	return c.Execute()
+}
+
+func (c *CLIExecutor) Gzip(filePath string) error {
+	c.WithCommand("gzip " + filePath).AsLongRunning()
+	return c.Execute()
+}
+
+func (c *CLIExecutor) Gunzip(filePath string) error {
+	c.WithCommand("gunzip " + filePath).AsLongRunning()
+	return c.Execute()
+}
+
+func (exe *CLIExecutor) TailLog(logPath string) *CLIExecutor {
+	exe.WithCommand("tail -10 " + logPath).
+		AsLongRunning().
+		WithCaptureStdout(true).
+		WithSpinny(true)
+	return exe
+}
+
+// TailLogAndWaitForKeyword tails the last 10 lines of a log file over SSH
+// until it finds the keyword or returns an error if execution fails.
+func (exe *CLIExecutor) WaitForKeyword(keyword string, interval time.Duration) error {
+
+	exe.AsLongRunning().WithCaptureStdout(true).WithSpinny(true)
+
+	for {
+		if err := exe.Execute(); err != nil {
+			return err
+		}
+
+		if strings.Contains(exe.GetResponseBody(), keyword) {
+			return nil
+		}
+
+		time.Sleep(interval)
+	}
+}
+
+func (exe *CLIExecutor) WaitForKeywordInLog(logPath, keyword string, interval time.Duration) error {
+	return exe.TailLog(logPath).WithTimeout(10*time.Second).WaitForKeyword(keyword, interval)
+}
+
+func (exe *CLIExecutor) BackgroundedCommand(command string, outputFile string) *CLIExecutor {
+	if len(outputFile) == 0 {
+		outputFile = "/dev/null"
+	}
+	//like WithCommand, but adds nohup and & to run in background and leave it there
+	return exe.WithCommand(fmt.Sprintf("nohup %s > %s 2>&1 </dev/null & echo $!", command, outputFile))
+}
+
+func (exe *CLIExecutor) ResponseHasKeyword(keyword string) bool {
+	return strings.Contains(exe.GetResponseBody(), keyword)
+}
+
+func (exe *CLIExecutor) ProcAlive(pid int) bool {
+	exe.AsLongRunning().WithCaptureStdout(true).WithSpinny(true)
+	exe.WithCommand(fmt.Sprintf("ps -o stat= -p %d", pid)) // Fetch only the process state
+	if err := exe.Execute(); err != nil {
+		return false
+	}
+
+	state := strings.TrimSpace(exe.GetResponseBody())
+	if state == "" || strings.HasPrefix(state, "Z") { // Ignore zombie processes
+		return false
+	}
+	return true
+}
+
+func (exe *CLIExecutor) WatchForProcessToDie(pid int, checkInterval time.Duration) error {
+	exe.AsLongRunning().WithCaptureStdout(true).WithSpinny(true)
+
+	for {
+		if !exe.ProcAlive(pid) {
+			VerbosePrintf("Process %d has exited.", pid)
+			return nil
+		}
+		VerbosePrintf("Process %d is still running...", pid)
+
+		time.Sleep(checkInterval)
+	}
+}
+
+func (exe *CLIExecutor) CheckAndKillProcess(procName string) error {
+	if len(procName) == 0 {
+		return fmt.Errorf("process name is empty")
+	}
+
+	exe.WithDirectory("/tmp").
+		WithSSHDebug(false).
+		WithCaptureStdout(true).
+		WithSpinny(false).AsLongRunning().WithCommand("ps -eo pid,command")
+	if err := exe.Execute(); err != nil {
+		fmt.Println("failed to get process list")
+		return err
+	}
+
+	//step 2: parse the process list and look for the process name
+
+	slice := strings.Split(exe.GetResponseBody(), "\n")
+	for i := 0; i < len(slice); i++ {
+		if strings.Contains(slice[i], procName) {
+			//step 3: if we find the process, kill it
+			//step 4: get the pid
+			//step 5: kill the process
+			VerbosePrintf("line: %q", slice[i])
+			fmt.Println("found process ", procName)
+			splits := strings.Split(strings.TrimSpace(slice[i]), " ")
+			pid := splits[0]
+			fmt.Printf("\tkilling process %q pid= %q\n", procName, pid)
+			exe.WithDirectory("/tmp").
+				WithSSHDebug(false).
+				WithCaptureStdout(true).
+				WithSpinny(false).AsLongRunning().WithCommand("kill -9 " + pid)
+			if err := exe.Execute(); err != nil {
+				fmt.Println("\tfailed to kill process ", procName, " pid=", pid)
+				return err
+			}
+			fmt.Printf("\tkilled process %s with pid=%s on host %s\n", procName, pid, exe.GetSSH().Host)
+			return nil
+		}
+	}
+	fmt.Println("did not find process ", procName)
+	return nil
+}
+
+func (exe *CLIExecutor) BackgroundCommand(outputFile string, countdown bool) int {
+
+	arglist := make([]string, 0)
+	oldargs := strings.Split(exe.command, " ")
+	for i := 0; i < len(oldargs); i++ {
+		if oldargs[i] == "-background" || oldargs[i] == "--background" || oldargs[i] == "-bg" || oldargs[i] == "--bg" || oldargs[i] == "-bkg" {
+			continue
+		}
+
+		arglist = append(arglist, oldargs[i])
+	}
+	//	arglist = append(arglist, "-inner")
+	cmd := exec.Command("bash", "-c", strings.Join(arglist, " "))
+	cmd.Env = os.Environ()
+
+	outFile, outFileerr := os.Create(outputFile + ".stdout")
+	if outFileerr != nil {
+		fmt.Printf("Error creating output file %v\n", outFileerr)
+		os.Exit(1)
+	}
+	defer outFile.Close()
+	errFile, errFileerr := os.Create(outputFile + ".stderr")
+	if errFileerr != nil {
+		fmt.Printf("Error creating output file %v\n", errFileerr)
+		os.Exit(1)
+	}
+	defer errFile.Close()
+
+	cmd.Dir = exe.directory
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if countdown || GetDebug() {
+		fmt.Println("Relaunching in the background... in ")
+		fmt.Println("3")
+		time.Sleep(time.Second)
+		fmt.Println("2")
+		time.Sleep(time.Second)
+		fmt.Println("1")
+		time.Sleep(time.Second)
+		fmt.Println("GO!")
+		time.Sleep(time.Second)
+	}
+	if err := cmd.Start(); err != nil {
+		panic(err.Error())
+	}
+	return cmd.Process.Pid
+
 }

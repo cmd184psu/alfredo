@@ -144,18 +144,18 @@ func TestSSHPipeContentToSSHCLI(t *testing.T) {
 	cli := "tee " + remotefile
 
 	if err = ssh.SecureRemotePipeExecution([]byte(content), cli); err != nil {
-		t.Errorf(err.Error())
+		t.Fatalf("%s", err.Error())
 	}
 	fmt.Println(ssh.GetBody())
 
 	if err = ssh.RemoteExecuteAndSpin("stat " + remotefile); err != nil {
-		t.Errorf(err.Error())
+		t.Fatalf("%s", err.Error())
 	}
 	fmt.Println("---")
 	fmt.Println(ssh.GetBody())
 	fmt.Println("---")
 	if err = ssh.RemoteExecuteAndSpin("cat " + remotefile); err != nil {
-		t.Errorf(err.Error())
+		t.Fatalf("%s", err.Error())
 	}
 	fmt.Println(ssh.GetBody())
 
@@ -174,17 +174,17 @@ func TestSSHContentToRemoteFile(t *testing.T) {
 	content := "and a one, and a two and a ..."
 
 	if err := ssh.SecureUploadContent([]byte(content), remotefile); err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 	}
 
 	if err = ssh.RemoteExecuteAndSpin("stat " + remotefile); err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 	}
 	fmt.Println("---")
 	fmt.Println(ssh.GetBody())
 	fmt.Println("---")
 	if err = ssh.RemoteExecuteAndSpin("cat " + remotefile); err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 	}
 	fmt.Println(ssh.GetBody())
 	fmt.Println("---END: TEST CONTENT to remote file test ----")

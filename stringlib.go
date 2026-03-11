@@ -226,7 +226,7 @@ func correctedParams(directoryPath *string, prefix *string, glob *string) {
 
 func GetFileFindCLI(directoryPath string, prefix string, glob string) string {
 	correctedParams(&directoryPath, &prefix, &glob)
-	return fmt.Sprintf("find " + directoryPath + " -iname \"" + prefix + "*." + glob + "\"")
+	return "find " + directoryPath + " -iname \"" + prefix + "*." + glob + "\""
 }
 
 func MoveDirs(needleSuffix string, st int, target string) error {
@@ -508,6 +508,16 @@ func MapToTableSlice(data map[string]string) []string {
 	return content
 }
 
+func MapToSlice(data map[string]string) []string {
+	var content []string
+	// Append data rows
+	for k, v := range data {
+		content = append(content, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	return content
+}
+
 func MapToTableSliceOrdered(data map[string]string, order []string) []string {
 	var content []string
 
@@ -634,6 +644,12 @@ func EatErrorAndReturnInt(i int, e error, retOnError int) int {
 	return retOnError
 }
 
+func EatErrorReturnBytes(b []byte, e error) []byte {
+	if e == nil {
+		return b
+	}
+	panic(e)
+}
 func Atoi(s string, retOnError int) int {
 	i, err := strconv.Atoi(s)
 	if err != nil {
@@ -642,13 +658,12 @@ func Atoi(s string, retOnError int) int {
 	return i
 }
 func Atoi64(s string, retOnError int64) int64 {
-	i, err := strconv.ParseInt(s,10,64)
+	i, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return retOnError
 	}
 	return i
 }
-
 
 func DeepCopyStringToPointer(s string) *string {
 	// Create a new string with the same value
@@ -745,4 +760,173 @@ func WriteLineToFile(filePath, line string) error {
 
 	_, err = file.WriteString(line + "\n")
 	return err
+}
+
+func BoolColor(b bool) string {
+	if !strings.EqualFold(os.Getenv("TERM"), "xterm-256color") {
+		if b {
+			return "true "
+		} else {
+			return "false"
+		}
+	}
+	const (
+		greenBright = "\033[92m"
+		red         = "\033[31m"
+		reset       = "\033[0m"
+	)
+	if b {
+		return fmt.Sprintf("%s✅ true %s", greenBright, reset)
+	}
+	return fmt.Sprintf("%s❌ false%s", red, reset)
+}
+
+func SummarizeField(filepath string, delim string, fieldNum int) ([]string, error) {
+	if !FileExistsEasy(filepath) {
+		return []string{}, fmt.Errorf("file does not exist: %s", filepath)
+	}
+	if len(delim) == 0 {
+		return []string{}, fmt.Errorf("delimiter cannot be empty")
+	}
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	counts := make(map[string]int)
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.Contains(line, delim) {
+			continue
+		}
+		fields := strings.Split(line, delim)
+		if len(fields) >= fieldNum {
+			key := strings.TrimSpace(fields[fieldNum-1])
+			counts[key]++
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(counts) == 0 {
+		return []string{}, nil
+	}
+
+	// Convert to sortable slice
+	type kv struct {
+		Key   string
+		Count int
+	}
+	var data []kv
+	for k, v := range counts {
+		data = append(data, kv{k, v})
+	}
+
+	// Sort numerically by count ascending
+	sort.Slice(data, func(i, j int) bool {
+		return data[i].Count < data[j].Count
+	})
+
+	// Build formatted output lines
+	var output []string
+	for _, kv := range data {
+		if len(strings.TrimSpace(kv.Key)) == 0 {
+			continue
+		}
+		output = append(output, fmt.Sprintf("%s: %d", kv.Key, kv.Count))
+	}
+
+	//sort output
+	sort.Strings(output)
+	return output, nil
+}
+
+func StripProtocol(httpAddr string) string {
+	if strings.HasPrefix(httpAddr, "http://") {
+		return httpAddr[7:]
+	} else if strings.HasPrefix(httpAddr, "https://") {
+		return httpAddr[8:]
+	}
+	return httpAddr
+}
+
+// DiffSlices compares two string slices and returns a diff similar to "diff -rbB".
+// Lines from 'a' are prefixed with "< ", lines from 'b' with "> ".
+// Blank lines are ignored in comparison (like -B flag).
+func DiffSlices(a, b []string) []string {
+	// Strip blank lines for comparison purposes (mimics -B flag)
+	filterBlanks := func(lines []string) []string {
+		out := make([]string, 0, len(lines))
+		for _, l := range lines {
+			if strings.TrimSpace(l) != "" {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+
+	a = filterBlanks(a)
+	b = filterBlanks(b)
+
+	// Build LCS table
+	m, n := len(a), len(b)
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if strings.TrimSpace(a[i-1]) == strings.TrimSpace(b[j-1]) { // -b: ignore whitespace changes
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else {
+				if dp[i-1][j] > dp[i][j-1] {
+					dp[i][j] = dp[i-1][j]
+				} else {
+					dp[i][j] = dp[i][j-1]
+				}
+			}
+		}
+	}
+
+	// Backtrack to find diff
+	var result []string
+	i, j := m, n
+	var chunks []string
+	for i > 0 || j > 0 {
+		switch {
+		case i > 0 && j > 0 && strings.TrimSpace(a[i-1]) == strings.TrimSpace(b[j-1]):
+			chunks = append(chunks, "  "+a[i-1])
+			i--
+			j--
+		case j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]):
+			chunks = append(chunks, "> "+b[j-1])
+			j--
+		default:
+			chunks = append(chunks, "< "+a[i-1])
+			i--
+		}
+	}
+
+	// Reverse (we built it backwards)
+	// for k := len(chunks) - 1; k >= 0; k-- {
+	// 	result = append(result, chunks[k])
+	// }
+	for k := len(chunks) - 1; k >= 0; k-- {
+		if !strings.HasPrefix(chunks[k], "  ") { // only keep changed lines
+			result = append(result, chunks[k])
+		}
+	}
+
+	return result
+}
+
+func DiffStrings(a, b string) []string {
+	return DiffSlices(strings.Split(a, "\n"), strings.Split(b, "\n"))
+}
+func DiffAny(a, b any) []string {
+	return DiffStrings(PrettyPrint(a), PrettyPrint(b))
 }

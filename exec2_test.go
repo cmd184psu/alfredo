@@ -3,13 +3,17 @@ package alfredo
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestCLIExecutor_Execute(t *testing.T) {
+func TestCLIExecutor_ExecuteSpecial(t *testing.T) {
 	SetQuiet(true)
+	os.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")
+
+	SetVerbose(true)
 	tests := []struct {
 		name           string
 		command        string
@@ -22,15 +26,108 @@ func TestCLIExecutor_Execute(t *testing.T) {
 		showSpinny     bool
 		captureStdout  bool
 		captureStderr  bool
+		AsLongRunning  bool
+		DumpOutput     bool
 		wantOutput     string
 		wantExitCode   int
 		wantErr        bool
 	}{
 		{
+			name:          "Local command without stdout capture",
+			command:       "find /home/cdelezenski/* -type f -name \"*\" -exec echo {} \\;",
+			captureStdout: false,
+			DumpOutput:    true,
+			wantOutput:    "",
+			wantExitCode:  0,
+			wantErr:       false,
+			sshHost:       "localhost",
+			sshKey:        ExpandTilde("~/.ssh/homelab_rsa"),
+			sshUser:       "cdelezenski",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executor := NewCLIExecutor().
+				WithCommand(tt.command).
+				WithRequestPayload(tt.requestPayload).
+				WithSSH(tt.sshHost, tt.sshKey, tt.sshUser).
+				WithSSHStruct(SSHStruct{
+					User: tt.sshUser,
+					Key:  tt.sshKey,
+					Host: tt.sshHost,
+				}).
+				WithDirectory(tt.directory).
+				WithTimeout(tt.timeout).
+				WithSpinny(tt.showSpinny).
+				WithCaptureStdout(tt.captureStdout).
+				WithCaptureStderr(tt.captureStderr).
+				WithTrimWhiteSpace(true)
+
+			// if tt.DumpOutput {
+			// 	executor.DumpOutput()
+			// }
+			fmt.Println("cli: ", executor.GetCli())
+			err := executor.AsLongRunning().Execute()
+			// fmt.Println("output: ", executor.GetResponseBody())
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CLIExecutor.Execute() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			//gotExitCode := executor.GetStatusCode()
+			// gotOutput := executor.GetResponseBody()
+			fmt.Println("exit code: ", executor.GetStatusCode())
+			// fmt.Println("cli: ", executor.GetCli())
+			// if gotOutput != tt.wantOutput {
+			// 	t.Errorf("CLIExecutor.Execute() gotOutput = %q, want %q", gotOutput, tt.wantOutput)
+			// }
+			// if gotExitCode != tt.wantExitCode {
+			// 	t.Errorf("CLIExecutor.Execute() gotExitCode = %v, want %v", gotExitCode, tt.wantExitCode)
+			// }
+
+		})
+	}
+}
+
+func TestCLIExecutor_Execute(t *testing.T) {
+	SetQuiet(true)
+	os.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")
+
+	SetVerbose(true)
+	tests := []struct {
+		name           string
+		command        string
+		subCommand     string
+		requestPayload string
+		sshHost        string
+		sshKey         string
+		sshUser        string
+		directory      string
+		timeout        time.Duration
+		showSpinny     bool
+		captureStdout  bool
+		captureStderr  bool
+		AsLongRunning  bool
+		DumpOutput     bool
+		wantOutput     string
+		wantExitCode   int
+		wantErr        bool
+	}{
+		{
+			name:          "Local command without stdout capture",
+			command:       "/usr/bin/true",
+			captureStdout: false,
+			wantOutput:    "",
+			wantExitCode:  0,
+			wantErr:       false,
+		},
+		{
 			name:          "Local command with stdout capture",
-			command:       "echo hello",
+			command:       "/usr/bin/ls -lah /usr/bin/true",
 			captureStdout: true,
-			wantOutput:    "hello",
+			captureStderr: true,
+			AsLongRunning: true,
+			wantOutput:    "-rwxr-xr-x. 1 root root 28K Apr 20  2024 /usr/bin/true",
 			wantExitCode:  0,
 			wantErr:       false,
 		},
@@ -114,6 +211,28 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			wantErr:        false,
 		},
 		{
+			name:          "local ls a file with spaces",
+			command:       "ls -lah \"/tmp/file with spaces.txt\"",
+			captureStdout: true,
+			captureStderr: true,
+			DumpOutput:    true,
+			wantOutput:    "ls: cannot access '/tmp/file with spaces.txt': No such file or directory",
+			wantExitCode:  -1,
+			wantErr:       true,
+		},
+		{
+			name:          "remote ls a file with spaces",
+			sshHost:       "localhost",
+			sshKey:        ExpandTilde("~/.ssh/homelab_rsa"),
+			sshUser:       os.Getenv("USER"),
+			command:       "ls -lah \"/tmp/file with spaces.txt\"",
+			captureStdout: true,
+			captureStderr: true,
+			wantOutput:    "ls: cannot access '/tmp/file with spaces.txt': No such file or directory",
+			wantExitCode:  -1,
+			wantErr:       true,
+		},
+		{
 			name:           "remote md5sum 2",
 			sshHost:        "localhost",
 			sshKey:         ExpandTilde("~/.ssh/homelab_rsa"),
@@ -145,6 +264,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			executor := NewCLIExecutor().
 				WithCommand(tt.command).
+				WithSubCommand(tt.subCommand).
 				WithRequestPayload(tt.requestPayload).
 				WithSSH(tt.sshHost, tt.sshKey, tt.sshUser).
 				WithSSHStruct(SSHStruct{
@@ -158,6 +278,12 @@ func TestCLIExecutor_Execute(t *testing.T) {
 				WithCaptureStdout(tt.captureStdout).
 				WithCaptureStderr(tt.captureStderr).
 				WithTrimWhiteSpace(true)
+
+			if tt.DumpOutput {
+				executor.DumpOutput()
+			}
+
+			fmt.Println("cli: ", executor.GetCli())
 			err := executor.Execute()
 			fmt.Println("output: ", executor.GetResponseBody())
 			if (err != nil) != tt.wantErr {
@@ -167,7 +293,6 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			gotExitCode := executor.GetStatusCode()
 			gotOutput := executor.GetResponseBody()
 			fmt.Println("exit code: ", executor.GetStatusCode())
-			fmt.Println("cli: ", executor.GetCli())
 			if gotOutput != tt.wantOutput {
 				t.Errorf("CLIExecutor.Execute() gotOutput = %q, want %q", gotOutput, tt.wantOutput)
 			}
@@ -816,6 +941,188 @@ func TestCLIExecutor_NormalizeName(t *testing.T) {
 			fmt.Printf("\tgot: %s vs want %s\n", got, tt.want)
 			if got != tt.want {
 				t.Errorf("CLIExecutor.NormalizeName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+func TestCLIExecutor_WaitForKeywordInLog(t *testing.T) {
+	tmpDir := "/tmp/alfredo_test_logs"
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	logFile := tmpDir + "/test.log"
+	keyword := "SUCCESS"
+
+	// Create a log file with some content
+	content := "INFO: Starting process\nINFO: Process running\nSUCCESS: Process completed\n"
+	if err := os.WriteFile(logFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create log file: %v", err)
+	}
+
+	type fields struct {
+		command        string
+		requestPayload string
+		sshHost        string
+		sshKey         string
+		sshUser        string
+		timeout        time.Duration
+		showSpinny     bool
+		captureStdout  bool
+		captureStderr  bool
+		statusCode     int
+		responseBody   string
+		trimWhiteSpace bool
+		directory      string
+		dump           bool
+		debugSSH       bool
+	}
+	type args struct {
+		logPath  string
+		keyword  string
+		interval time.Duration
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "Keyword found in log",
+			fields: fields{
+				directory: tmpDir,
+			},
+			args: args{
+				logPath:  logFile,
+				keyword:  keyword,
+				interval: 1 * time.Second,
+			},
+			wantErr: false,
+		},
+		// {
+		// 	name: "Keyword not found in log",
+		// 	fields: fields{
+		// 		directory: tmpDir,
+		// 	},
+		// 	args: args{
+		// 		logPath:  logFile,
+		// 		keyword:  "NOT_FOUND",
+		// 		interval: 100 * time.Millisecond,
+		// 	},
+		// 	wantErr: true,
+		// },
+		// {
+		// 	name: "Log file does not exist",
+		// 	fields: fields{
+		// 		directory: tmpDir,
+		// 	},
+		// 	args: args{
+		// 		logPath:  tmpDir + "/nonexistent.log",
+		// 		keyword:  keyword,
+		// 		interval: 100 * time.Millisecond,
+		// 	},
+		// 	wantErr: true,
+		// },
+		// {
+		// 	name: "Remote log file with keyword",
+		// 	fields: fields{
+		// 		directory: tmpDir,
+		// 		sshHost:   "localhost",
+		// 		sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+		// 		sshUser:   os.Getenv("USER"),
+		// 	},
+		// 	args: args{
+		// 		logPath:  logFile,
+		// 		keyword:  keyword,
+		// 		interval: 100 * time.Millisecond,
+		// 	},
+		// 	wantErr: false,
+		// },
+		// {
+		// 	name: "Remote log file without keyword",
+		// 	fields: fields{
+		// 		directory: tmpDir,
+		// 		sshHost:   "localhost",
+		// 		sshKey:    ExpandTilde("~/.ssh/homelab_rsa"),
+		// 		sshUser:   os.Getenv("USER"),
+		// 	},
+		// 	args: args{
+		// 		logPath:  logFile,
+		// 		keyword:  "NOT_FOUND",
+		// 		interval: 100 * time.Millisecond,
+		// 	},
+		// 	wantErr: true,
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &CLIExecutor{
+				command:        tt.fields.command,
+				requestPayload: tt.fields.requestPayload,
+				sshHost:        tt.fields.sshHost,
+				sshKey:         tt.fields.sshKey,
+				sshUser:        tt.fields.sshUser,
+				timeout:        tt.fields.timeout,
+				showSpinny:     tt.fields.showSpinny,
+				captureStdout:  tt.fields.captureStdout,
+				captureStderr:  tt.fields.captureStderr,
+				statusCode:     tt.fields.statusCode,
+				responseBody:   tt.fields.responseBody,
+				trimWhiteSpace: tt.fields.trimWhiteSpace,
+				directory:      tt.fields.directory,
+				dump:           tt.fields.dump,
+				debugSSH:       tt.fields.debugSSH,
+			}
+			err := c.WaitForKeywordInLog(tt.args.logPath, tt.args.keyword, tt.args.interval)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CLIExecutor.WaitForKeywordInLog() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCLIExecutor_ProcAlive(t *testing.T) {
+	tests := []struct {
+		name string // description of this test case
+		pid  int    // process ID to check
+		want bool   // expected result
+	}{
+		{
+			name: "Process is alive",
+			pid:  os.Getpid(), // Current process ID
+			want: true,
+		},
+		{
+			name: "Process does not exist",
+			pid:  999999, // Non-existent PID
+			want: false,
+		},
+		{
+			name: "Zombie process",
+			pid: func() int {
+				cmd := exec.Command("sleep", "1")
+				cmd.Start()
+				cmd.Process.Kill()
+				return cmd.Process.Pid
+			}(),
+			want: false,
+		},
+		{
+			name: "Process with invalid PID",
+			pid:  -1, // Invalid PID
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exe := NewCLIExecutor()
+			got := exe.ProcAlive(tt.pid)
+			if got != tt.want {
+				t.Errorf("ProcAlive() = %v, want %v", got, tt.want)
 			}
 		})
 	}
