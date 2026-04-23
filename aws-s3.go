@@ -901,7 +901,9 @@ func (s3c S3ClientSession) RecursiveBucketDelete() error {
 	if !b {
 		return nil
 	}
-
+	if err := s3c.IsVersioningEnabled(); err != nil {
+		return err
+	}
 	if s3c.Versioning {
 		return s3c.recursiveBucketDeleteWithVersions()
 	}

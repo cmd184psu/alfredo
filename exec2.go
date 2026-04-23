@@ -15,7 +15,59 @@ import (
 	"time"
 
 	"github.com/google/shlex"
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
+
+type CLIExecutorIface interface {
+	WithCommand(command string) CLIExecutorIface
+	WithSubCommand(subcommand string) CLIExecutorIface
+	WithRequestPayload(payload string) CLIExecutorIface
+	WithSSH(host, key, user string) CLIExecutorIface
+	WithSSHStruct(s SSHStruct) CLIExecutorIface
+	WithSSHDebug(b bool) CLIExecutorIface
+	WithContext(ctx context.Context) CLIExecutorIface
+	WithDirectory(directory string) CLIExecutorIface
+	WithExitOneIsOK() CLIExecutorIface
+	WithExitOneIsNotOK() CLIExecutorIface
+	WithTimeout(timeout time.Duration) CLIExecutorIface
+	WithSudo(s bool) CLIExecutorIface
+	WithCaptureStdout(capture bool) CLIExecutorIface
+	WithCaptureStderr(capture bool) CLIExecutorIface
+	WithSpinny(show bool) CLIExecutorIface
+	WithTrimWhiteSpace(trim bool) CLIExecutorIface
+	WithResponseBody(responseBody string) CLIExecutorIface
+	AsLongRunning() CLIExecutorIface
+	WaitForKeyword(keyword string, interval time.Duration) error
+	WaitForKeywordInLog(logPath string, keyword string, interval time.Duration) error
+
+	Execute() error
+	GetResponseBody() string
+	GetResponseBodyAsSlice() []string
+	GetResponseBodyAsInt64() int64
+	BackgroundCommand(logPath string, countdown bool) int
+
+	CaptureJavaProcessList(jvm string) error
+	GetProcListFromResponseBody() []ProcessInfo
+
+	GetStatusCode() int
+	GetCli() string
+	DumpOutput() CLIExecutorIface
+	HashFile(fileName string) string
+	TailLog(logPath string) CLIExecutorIface
+	NormalizeName(fuzzy string) error
+	GetSSH() SSHStruct
+	CheckAndKillProcess(procName string) error
+	GetCommand() string
+	CreateSymlink(fromFile, toLink string) error
+	IsThisPortOpenIPV4(ip string, port int) CLIExecutorIface
+	FindFiles(path, prefix, suffix string) CLIExecutorIface
+	ReadStructFromJSONFile(path string, v interface{}) error
+	FileExists(path string) bool
+	DropSSH() CLIExecutorIface
+	UploadFile(fromPath, toPath string) error
+	DownloadFile(fromPath, toPath string) error
+}
 
 type CLIExecutor struct {
 	command           string
@@ -45,25 +97,25 @@ const DefaultExeTimeout = 5 * time.Second
 func NewCLIExecutor() *CLIExecutor {
 	ex := &CLIExecutor{}
 	//from now on, all instances will be long running by default
-	return ex.AsLongRunning()
+	return ex.AsLongRunning().(*CLIExecutor)
 }
 
-func (c *CLIExecutor) WithCommand(command string) *CLIExecutor {
+func (c *CLIExecutor) WithCommand(command string) CLIExecutorIface {
 	c.command = command
 	return c
 }
 
-func (c *CLIExecutor) WithSubCommand(subcommand string) *CLIExecutor {
+func (c *CLIExecutor) WithSubCommand(subcommand string) CLIExecutorIface {
 	c.subCommand = subcommand
 	return c
 }
 
-func (c *CLIExecutor) WithRequestPayload(payload string) *CLIExecutor {
+func (c *CLIExecutor) WithRequestPayload(payload string) CLIExecutorIface {
 	c.requestPayload = payload
 	return c
 }
 
-func (c *CLIExecutor) WithSSH(host, key, user string) *CLIExecutor {
+func (c *CLIExecutor) WithSSH(host, key, user string) CLIExecutorIface {
 	c.sshHost = host
 	c.sshKey = key
 	c.sshUser = user
@@ -74,14 +126,14 @@ func (c *CLIExecutor) HasSSH() bool {
 	return len(c.sshHost) != 0
 }
 
-func (c *CLIExecutor) DropSSH() *CLIExecutor {
+func (c *CLIExecutor) DropSSH() CLIExecutorIface {
 	c.sshHost = ""
 	c.sshKey = ""
 	c.sshUser = ""
 	return c
 }
 
-func (c *CLIExecutor) WithSSHStruct(s SSHStruct) *CLIExecutor {
+func (c *CLIExecutor) WithSSHStruct(s SSHStruct) CLIExecutorIface {
 	c.sshHost = s.Host
 	c.sshKey = s.Key
 	c.sshUser = s.User
@@ -89,7 +141,7 @@ func (c *CLIExecutor) WithSSHStruct(s SSHStruct) *CLIExecutor {
 	return c
 }
 
-func (c *CLIExecutor) WithContext(ctx context.Context) *CLIExecutor {
+func (c *CLIExecutor) WithContext(ctx context.Context) CLIExecutorIface {
 	c.ctx = ctx
 	return c
 }
@@ -103,33 +155,33 @@ func (c *CLIExecutor) GetSSH() SSHStruct {
 	}
 }
 
-func (c *CLIExecutor) WithSSHDebug(b bool) *CLIExecutor {
+func (c *CLIExecutor) WithSSHDebug(b bool) CLIExecutorIface {
 	c.debugSSH = b
 	return c
 }
 
-func (c *CLIExecutor) InsecureMode() *CLIExecutor {
+func (c *CLIExecutor) InsecureMode() CLIExecutorIface {
 	c.secureMode = false
 	return c
 }
-func (c *CLIExecutor) SecureMode() *CLIExecutor {
+func (c *CLIExecutor) SecureMode() CLIExecutorIface {
 	c.secureMode = true
 	return c
 }
 
-func (c *CLIExecutor) WithDirectory(directory string) *CLIExecutor {
+func (c *CLIExecutor) WithDirectory(directory string) CLIExecutorIface {
 	c.directory = directory
 	return c
 }
-func (c *CLIExecutor) WithExitOneIsOK() *CLIExecutor {
+func (c *CLIExecutor) WithExitOneIsOK() CLIExecutorIface {
 	c.ignoreExitCodeOne = true
 	return c
 }
-func (c *CLIExecutor) WithExitOneIsNotOK() *CLIExecutor {
+func (c *CLIExecutor) WithExitOneIsNotOK() CLIExecutorIface {
 	c.ignoreExitCodeOne = false
 	return c
 }
-func (c *CLIExecutor) WithTimeout(timeout time.Duration) *CLIExecutor {
+func (c *CLIExecutor) WithTimeout(timeout time.Duration) CLIExecutorIface {
 	if timeout == 0 {
 		return c
 	}
@@ -137,24 +189,24 @@ func (c *CLIExecutor) WithTimeout(timeout time.Duration) *CLIExecutor {
 	return c
 }
 
-func (c *CLIExecutor) WithSudo(s bool) *CLIExecutor {
+func (c *CLIExecutor) WithSudo(s bool) CLIExecutorIface {
 	c.useSudo = s
 	return c
 }
 
 // stick around for 100 days
-func (c *CLIExecutor) AsLongRunning() *CLIExecutor {
+func (c *CLIExecutor) AsLongRunning() CLIExecutorIface {
 	return c.WithTimeout(8640000 * time.Second)
 }
 
-func (c *CLIExecutor) DumpOutput() *CLIExecutor {
+func (c *CLIExecutor) DumpOutput() CLIExecutorIface {
 	c.captureStdout = true
 	c.captureStderr = true
 	c.dump = true
 	return c
 }
 
-func (c *CLIExecutor) WithSpinny(show bool) *CLIExecutor {
+func (c *CLIExecutor) WithSpinny(show bool) CLIExecutorIface {
 	if GetQuiet() {
 		c.showSpinny = false
 		return c
@@ -163,24 +215,36 @@ func (c *CLIExecutor) WithSpinny(show bool) *CLIExecutor {
 	return c
 }
 
-func (c *CLIExecutor) WithCaptureStdout(capture bool) *CLIExecutor {
+func (c *CLIExecutor) WithCaptureStdout(capture bool) CLIExecutorIface {
 	c.captureStdout = capture
 	return c
 }
 
-func (c *CLIExecutor) WithCaptureStderr(capture bool) *CLIExecutor {
+func (c *CLIExecutor) WithCaptureStderr(capture bool) CLIExecutorIface {
 	c.captureStderr = capture
 	return c
 }
 
-func (c *CLIExecutor) WithResponseBody(responseBody string) *CLIExecutor {
+func (c *CLIExecutor) WithResponseBody(responseBody string) CLIExecutorIface {
 	c.responseBody = responseBody
 	return c
 }
 
 func (c *CLIExecutor) GetResponseBody() string {
 	if c.trimWhiteSpace {
-		return strings.TrimSpace(c.responseBody)
+		body := strings.TrimSpace(c.responseBody)
+		c.responseBody = body
+	}
+
+	lines := strings.Split(c.responseBody, "\n")
+	if len(lines) == 0 {
+		return c.responseBody
+	}
+
+	lastLine := strings.TrimSpace(lines[len(lines)-1])
+	if strings.HasPrefix(lastLine, "Connection to ") &&
+		strings.HasSuffix(lastLine, " closed.") {
+		return strings.Join(lines[:len(lines)-1], "\n")
 	}
 	return c.responseBody
 }
@@ -190,9 +254,13 @@ func (c *CLIExecutor) GetResponseBodyAsSlice() []string {
 	if len(body) == 0 {
 		return []string{}
 	}
+	if strings.Contains(body, "Connection to ") {
+		panic("should not get here")
+	}
+
 	return strings.Split(body, "\n")
 }
-func (c *CLIExecutor) WithTrimWhiteSpace(trim bool) *CLIExecutor {
+func (c *CLIExecutor) WithTrimWhiteSpace(trim bool) CLIExecutorIface {
 	c.trimWhiteSpace = trim
 	return c
 }
@@ -201,7 +269,7 @@ func (c *CLIExecutor) GetTrimWhiteSpace() bool {
 	return c.trimWhiteSpace
 }
 
-func (c *CLIExecutor) WithStatusCode(statusCode int) *CLIExecutor {
+func (c *CLIExecutor) WithStatusCode(statusCode int) CLIExecutorIface {
 	c.statusCode = statusCode
 	return c
 }
@@ -223,6 +291,35 @@ func (c *CLIExecutor) GetCli() string {
 	}
 
 	return c.GetCommandWithSub()
+}
+
+// buildSSHArgList constructs the ssh argument list used for exec.Command.
+// Extracted for unit testing so we can ensure options like -tt are only
+// included when necessary (e.g. when sudo is requested). Keep this logic
+// in sync with Execute().
+func (c *CLIExecutor) buildSSHArgList() []string {
+	arglist := []string{"-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.GetCommandWithSub()}
+	if c.debugSSH || GetDebug() {
+		fmt.Println("key=" + c.sshKey)
+		fmt.Println("user=" + c.sshUser)
+		fmt.Println("host=" + c.sshHost)
+		fmt.Println("command=" + c.command)
+		arglist = append([]string{"-vvv"}, arglist...)
+	}
+
+	// Always suppress noisy connection-close diagnostics with -q, and set
+	// LogLevel=ERROR. Only allocate a pseudo-tty (-tt) when sudo is
+	// requested as that interferes with piping stdin to the remote command.
+	sshOpts := []string{"-q", "-o", "LogLevel=ERROR"}
+	// Only request a tty when sudo is required and there's no request payload
+	// being piped to the remote command. Allocating a tty breaks piping stdin
+	// through ssh for many commands (e.g. md5sum).
+	if c.useSudo && len(c.requestPayload) == 0 {
+		sshOpts = append([]string{"-tt"}, sshOpts...)
+	}
+	arglist = append(sshOpts, arglist...)
+
+	return arglist
 }
 
 func (c *CLIExecutor) GetCommandWithSub() string {
@@ -272,6 +369,7 @@ func (c *CLIExecutor) CreateSymlink(fromFile, toLink string) error {
 	}
 
 	return nil
+
 }
 
 func (c *CLIExecutor) Execute() error {
@@ -327,6 +425,9 @@ func (c *CLIExecutor) Execute() error {
 	}
 
 	if c.sshHost != "" {
+		if !FileExistsEasy(ExpandTilde(c.sshKey)) {
+			return fmt.Errorf("ssh key file does not exist: %s", ExpandTilde(c.sshKey))
+		}
 		arglist := []string{"-i", ExpandTilde(c.sshKey), fmt.Sprintf("%s@%s", c.sshUser, c.sshHost), c.GetCommandWithSub()}
 		if c.debugSSH || GetDebug() {
 			fmt.Println("key=" + c.sshKey)
@@ -336,12 +437,19 @@ func (c *CLIExecutor) Execute() error {
 
 			arglist = append([]string{"-vvv"}, arglist...)
 		}
-		arglist = append([]string{"-tt"}, arglist...)
+		// suppress ssh diagnostic message like "Connection to <host> closed" by using -q
+		// Only allocate a pseudo-tty when sudo is requested. Allocating a tty
+		// (with -tt) interferes with piping stdin to the remote command, so
+		// avoid it unless it's needed for sudo prompts.
+		sshOpts := []string{"-o", "LogLevel=ERROR", "-q"}
+		if c.useSudo {
+			sshOpts = append([]string{"-tt"}, sshOpts...)
+		}
+		arglist = append(sshOpts, arglist...)
 		if !c.secureMode {
 			VerbosePrintln("using insecure ssh method (no host key checking)")
 			arglist = append([]string{"-o", "StrictHostKeyChecking=no",
 				"-o", "GlobalKnownHostsFile=/dev/null",
-				"-o", "LogLevel=ERROR",
 				"-o", "ControlMaster=no",
 				"-o", "ControlPath=none",
 				"-o", "ControlPersist=no",
@@ -567,10 +675,11 @@ func (c *CLIExecutor) HashFile(fileName string) string {
 func (c *CLIExecutor) CaptureJavaProcessList(jvm string) error {
 	VerbosePrintf("BEGIN:: CaptureJavaProcessList(%s)", jvm)
 	defer VerbosePrintf("END:: CaptureJavaProcessList(%s)", jvm)
-	c.WithCaptureStdout(true).WithCaptureStderr(true)
-	c.WithCommand("ps -eo pid,command").WithResponseBody("").WithTrimWhiteSpace(true).AsLongRunning()
+	os.Setenv("COLUMNS", "999") // to avoid truncated output from ps
+	cli := "ps -eo pid,command"
 
-	//fmt.Println("cli: ", c.GetCli())
+	c.WithCaptureStdout(true)
+	c.WithCommand(cli).WithResponseBody("").WithTrimWhiteSpace(true).AsLongRunning()
 
 	if err := c.Execute(); err != nil {
 		return err
@@ -580,21 +689,18 @@ func (c *CLIExecutor) CaptureJavaProcessList(jvm string) error {
 		return fmt.Errorf("CaptureJavaProcessList():: no response body")
 	}
 
-	//VerbosePrintf("response body: %s", c.responseBody)
-
 	proclist, err := GetJavaProcessesFromBytes([]byte(c.responseBody), jvm)
 
 	if err != nil {
 		return err
 	}
-
 	c.responseBody = PrettyPrint(proclist)
 	return nil
 }
 
 func (c *CLIExecutor) GetProcListFromResponseBody() []ProcessInfo {
 	var proclist []ProcessInfo
-	if err := ReadStructFromString(c.responseBody, &proclist); err != nil {
+	if err := ReadStructFromString(c.GetResponseBody(), &proclist); err != nil {
 		return []ProcessInfo{}
 	}
 	return proclist
@@ -626,7 +732,7 @@ func DiskDuplicatorArgs(device string, outputFile string, blockSize int64, count
 }
 
 // nc -zv 192.168.1.100 80 && echo "Port is open" || echo "Port is closed"
-func (c *CLIExecutor) IsThisPortOpenIPV4(ip string, port int) *CLIExecutor {
+func (c *CLIExecutor) IsThisPortOpenIPV4(ip string, port int) CLIExecutorIface {
 	return c.WithCommand(fmt.Sprintf("nc -zv %s %d", ip, port)).WithExitOneIsOK().WithCaptureStdout(true).WithCaptureStderr(true).AsLongRunning()
 }
 
@@ -842,7 +948,7 @@ func (c *CLIExecutor) GetResponseBodyAsInt64() int64 {
 	return value
 }
 
-func (c *CLIExecutor) SSHKeyGen(keyFile string, bits int, passphrase string) *CLIExecutor {
+func (c *CLIExecutor) SSHKeyGen(keyFile string, bits int, passphrase string) CLIExecutorIface {
 	if len(keyFile) == 0 {
 		panic("keyFile cannot be empty")
 	}
@@ -886,7 +992,7 @@ func (c *CLIExecutor) Gunzip(filePath string) error {
 	return c.Execute()
 }
 
-func (exe *CLIExecutor) TailLog(logPath string) *CLIExecutor {
+func (exe *CLIExecutor) TailLog(logPath string) CLIExecutorIface {
 	exe.WithCommand("tail -10 " + logPath).
 		AsLongRunning().
 		WithCaptureStdout(true).
@@ -914,15 +1020,11 @@ func (exe *CLIExecutor) WaitForKeyword(keyword string, interval time.Duration) e
 }
 
 func (exe *CLIExecutor) WaitForKeywordInLog(logPath, keyword string, interval time.Duration) error {
-	return exe.TailLog(logPath).WithTimeout(10*time.Second).WaitForKeyword(keyword, interval)
-}
-
-func (exe *CLIExecutor) BackgroundedCommand(command string, outputFile string) *CLIExecutor {
-	if len(outputFile) == 0 {
-		outputFile = "/dev/null"
+	if !exe.FileExists(logPath) {
+		return fmt.Errorf("log file does not exist: %s", logPath)
 	}
-	//like WithCommand, but adds nohup and & to run in background and leave it there
-	return exe.WithCommand(fmt.Sprintf("nohup %s > %s 2>&1 </dev/null & echo $!", command, outputFile))
+
+	return exe.TailLog(logPath).WithTimeout(10*time.Second).WaitForKeyword(keyword, interval)
 }
 
 func (exe *CLIExecutor) ResponseHasKeyword(keyword string) bool {
@@ -1052,3 +1154,209 @@ func (exe *CLIExecutor) BackgroundCommand(outputFile string, countdown bool) int
 	return cmd.Process.Pid
 
 }
+
+// find /opt -iname "prefix*suffix""
+func (c *CLIExecutor) FindFiles(path, prefix, suffix string) CLIExecutorIface {
+	c.WithCommand(GetFileFindCLI(path, prefix, suffix))
+	return c.WithCaptureStdout(true).WithTrimWhiteSpace(true)
+}
+
+func (c *CLIExecutor) ReadStructFromJSONFile(path string, v interface{}) error {
+	c.WithCommand("cat " + path).WithCaptureStdout(true).WithTrimWhiteSpace(true)
+	c.dump = false
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("failed to read file %s: %w", path, err)
+	}
+	return ReadStructFromString(c.GetResponseBody(), v)
+}
+
+// func (c *CLIExector) WriteStructToJSONFile(path string, v interface{}) error {
+// 	jsonBytes, err := json.MarshalIndent(v, "", "  ")
+// 	if err != nil {
+// 		return fmt.Errorf("failed to marshal struct to JSON: %w", err)
+// 	}
+// 	c.WithCommand(fmt.Sprintf("cat > %s", path)).
+// 		WithCaptureStdout(false).
+// 		WithCaptureStderr(true).
+// 		WithRequestPayload(string(jsonBytes)).
+// 		AsLongRunning()
+// 	if err := c.Execute(); err != nil {
+// 		return fmt.Errorf("failed to write struct to file %s: %w", path, err)
+// 	}
+// 	return nil
+// }
+
+func (c *CLIExecutor) FileExists(path string) bool {
+	c.WithCommand("test -f " + path).WithCaptureStdout(false).WithCaptureStderr(false)
+	if err := c.Execute(); err != nil {
+		return false
+	}
+	return true
+}
+
+// fromPath is local
+// toPath is assumed to be remote
+// how this works: replace toPath with /home/USER/.tempdir/filename, then use sudo mv to move it to where it should go
+func (c *CLIExecutor) UploadFile(fromPath, toPath string) error {
+	if c.sshHost == "" {
+		return fmt.Errorf("UploadFile is only supported for remote hosts")
+	}
+	if !FileExistsEasy(fromPath) {
+		return fmt.Errorf("local file does not exist: %s", fromPath)
+	}
+
+	remoteTempPath := fmt.Sprintf("/home/%s/.temp_upload/%s", c.sshUser, filepath.Base(toPath))
+
+	sudobefore := c.useSudo
+
+	c.WithCommand("mkdir -p " + filepath.Dir(remoteTempPath)).AsLongRunning().WithSudo(false)
+	if err := c.Execute(); err != nil {
+		//restore sudo state before returning
+		c.WithSudo(sudobefore)
+		return fmt.Errorf("unable to create remote temp directory: %s", err.Error())
+	}
+	c.WithSudo(sudobefore)
+	// Parse the private key
+	// privateKey, err := s.parseSSHKey()
+	// //privateKey, err := ssh.ParsePrivateKey(keyBytes)
+	// if err != nil {
+	// 	return err
+	// }
+	s := c.GetSSH()
+	// Create an SSH client configuration
+	config := s.CreateClientConfig()
+
+	// Connect to the remote host
+	sshClient, err := ssh.Dial("tcp", c.sshHost+":22", &config)
+	if err != nil {
+		fmt.Println("unable to establish ssh connection")
+		return err
+	}
+	defer sshClient.Close()
+
+	// Create an SFTP session
+	sftpClient, err := sftp.NewClient(sshClient)
+	if err != nil {
+		fmt.Println("unable to establish sftp connection")
+		return err
+	}
+	defer sftpClient.Close()
+
+	// Open the remote file
+	remoteFile, err := sftpClient.Create(remoteTempPath)
+	if err != nil {
+		fmt.Printf("unable to create remote file %s: %s\n", remoteTempPath, err.Error())
+		return err
+	}
+	defer remoteFile.Close()
+
+	// Create or truncate the local file
+	localFile, err := os.Open(fromPath)
+	if err != nil {
+		fmt.Printf("unable to open local file %s: %s\n", fromPath, err.Error())
+		return err
+	}
+	defer localFile.Close()
+
+	// Copy the remote file content to the local file
+	//  write to, read from
+	var w int64
+	VerbosePrintf("copying from %s to %s\n", fromPath, remoteTempPath)
+
+	w, err = io.Copy(remoteFile, localFile)
+
+	if err != nil {
+		VerbosePrintln("error copying file: " + err.Error())
+		VerbosePrintln("err=" + err.Error())
+	}
+	if w == 0 {
+		panic("zero bytes were written.. clearly, should be the case")
+	}
+	// if ! this.silent {
+	// 	fmt.Printf("wrote %d bytes\n", w)
+	// }
+	c.WithCommand(fmt.Sprintf("mv -vf %s %s", remoteTempPath, toPath)).AsLongRunning()
+
+	VerbosePrintf("final cli: %s\n", c.GetCli())
+
+	return c.Execute()
+}
+
+// fromPath is remote
+// toPath is assumed to be local
+// how this works:
+//
+//	sudo copy file to ~/.tempdir/ on remote host
+//	use sudo to chown the file as the user
+//	download per usual
+//	remove evidence of temporary file
+func (c *CLIExecutor) DownloadFile(fromFile, toPath string) error {
+	//step 1: make a .temp_download directory in the user's home directory on the remote host
+	if c.sshHost == "" {
+		return fmt.Errorf("DownloadFile is only supported for remote hosts")
+	}
+	if !c.FileExists(fromFile) {
+		return fmt.Errorf("remote file does not exist: %s", fromFile)
+	}
+	remoteTempPath := fmt.Sprintf("/home/%s/.temp_download/%s", c.sshUser, filepath.Base(fromFile))
+
+	sudobefore := c.useSudo
+
+	c.WithCommand("mkdir -p " + filepath.Dir(remoteTempPath)).AsLongRunning().WithSudo(false)
+	if err := c.Execute(); err != nil {
+		c.WithSudo(sudobefore)
+		return fmt.Errorf("unable to create remote temp directory: %s", err.Error())
+	}
+	c.WithSudo(sudobefore)
+
+	c.WithCommand(fmt.Sprintf("cp -vf %s %s", fromFile, remoteTempPath)).AsLongRunning()
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to copy file to remote temp location: %s", err.Error())
+	}
+	c.WithCommand(fmt.Sprintf("chown %s %s", c.sshUser, remoteTempPath)).AsLongRunning()
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to chown file in remote temp location: %s", err.Error())
+	}
+	c.WithCommand(fmt.Sprintf("chmod u+r %s", remoteTempPath)).AsLongRunning()
+	if err := c.Execute(); err != nil {
+		return fmt.Errorf("unable to chmod file in remote temp location: %s", err.Error())
+	}
+	s := c.GetSSH()
+	config := s.CreateClientConfig()
+
+	// Connect to the remote host
+	sshClient, err := ssh.Dial("tcp", s.Host+":22", &config)
+	if err != nil {
+		return err
+	}
+	defer sshClient.Close()
+
+	// Create an SFTP session
+	sftpClient, err := sftp.NewClient(sshClient)
+	if err != nil {
+		return err
+	}
+	defer sftpClient.Close()
+	// Open the remote file
+	remoteFile, err := sftpClient.Open(remoteTempPath)
+	if err != nil {
+		VerbosePrintln("returning with err: " + err.Error())
+		return err
+	}
+	defer remoteFile.Close()
+
+	// Create or truncate the local file
+	localFile, err := os.Create(toPath)
+	if err != nil {
+		VerbosePrintln("returning with err: " + err.Error())
+		return err
+	}
+	defer localFile.Close()
+
+	// Copy the remote file content to the local file
+	_, err = io.Copy(localFile, remoteFile)
+
+	return err
+}
+
+var _ CLIExecutorIface = (*CLIExecutor)(nil)

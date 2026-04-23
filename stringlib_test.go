@@ -476,3 +476,58 @@ func TestSummarizeField(t *testing.T) {
 		})
 	}
 }
+
+func TestHumanReadableSeconds(t *testing.T) {
+    tests := []struct {
+        name string // description of this test case
+        // Named input parameters for target function.
+        s    int64
+        want string
+    }{
+        {
+            name: "zero seconds",
+            s:    0,
+            want: "00 H : 00 M : 00 S",
+        },
+        {
+            name: "less than a minute",
+            s:    30,
+            want: "00 H : 00 M : 30 S",
+        },
+        {
+            name: "exactly one minute",
+            s:    60,
+            want: "00 H : 01 M : 00 S",
+        },
+        {
+            name: "less than an hour",
+            s:    275, // 4 minutes and 35 seconds
+            want: "00 H : 04 M : 35 S",
+        },
+        {
+            name: "exactly one hour",
+            s:    3600,
+            want: "01 H : 00 M : 00 S",
+        },
+        {
+            name: "more than an hour but less than a day",
+            s:    7265, // 2 hours, 1 minute, and 5 seconds
+            want: "02 H : 01 M : 05 S",
+        },
+        {
+            name: "exactly one day",
+            s:    86400,
+            want: "24 H : 00 M : 00 S",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got := HumanReadableSeconds(tt.s)
+            if got != tt.want {
+                t.Errorf("HumanReadableSeconds() = %v, want %v", got, tt.want)
+            }
+        })
+    }
+}
+

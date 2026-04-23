@@ -1,16 +1,14 @@
 module github.com/cmd184psu/alfredo
 
-go 1.24.0
-
-toolchain go1.24.7
+go 1.26.1
 
 require (
 	github.com/aws/aws-sdk-go v1.55.8
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pkg/sftp v1.13.10
-	golang.org/x/crypto v0.47.0
-	golang.org/x/term v0.39.0
+	golang.org/x/crypto v0.50.0
+	golang.org/x/term v0.42.0
 )
 
 require (
@@ -21,12 +19,12 @@ require (
 )
 
 require (
-	github.com/go-chi/chi/v5 v5.2.4
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sys v0.40.0
+	golang.org/x/sys v0.43.0
 	gopkg.in/ini.v1 v1.67.1
 )
 
