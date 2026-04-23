@@ -127,7 +127,7 @@ func HumanReadableSeconds(s int64) string {
 	minutes := d / time.Minute
 	d -= minutes * time.Minute
 	seconds := d / time.Second
-	return fmt.Sprintf("%02d H:%02d M:%02d S", hours, minutes, seconds)
+	return fmt.Sprintf("%02d H : %02d M : %02d S", hours, minutes, seconds)
 }
 
 func HumanReadableStorageCapacity(b int64) string {
@@ -760,6 +760,24 @@ func WriteLineToFile(filePath, line string) error {
 
 	_, err = file.WriteString(line + "\n")
 	return err
+}
+
+const (
+	ColorReset  = 0
+	ColorRed    = 31
+	ColorGreen  = 32
+	ColorYellow = 33
+	ColorBlue   = 34
+	ColorPurple = 35
+	ColorCyan   = 36
+	ColorWhite  = 37
+)
+
+func StringColor(s string, colorCode int) string {
+	if !strings.EqualFold(os.Getenv("TERM"), "xterm-256color") {
+		return s
+	}
+	return fmt.Sprintf("\033[%dm%s%s", colorCode, s, "\033[0m")
 }
 
 func BoolColor(b bool) string {

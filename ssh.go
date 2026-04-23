@@ -122,6 +122,7 @@ func (s *SSHStruct) CreateClientConfig() ssh.ClientConfig {
 	//Timeout: time.Duration(s.ConnectTimeout)}
 }
 
+//Deprecated: use exe.DownloadFile() instead, which includes sudo support
 func (s SSHStruct) SecureDownload(remoteFilePath string, localFilePath string) error {
 	// Parse the private key
 	VerbosePrintf("remoteFilePath: %s", remoteFilePath)
@@ -241,6 +242,7 @@ func (s *SSHStruct) SecureUploadContent(content []byte, remoteFilePath string) e
 	return err
 }
 
+//Deprecated: use exe.UploadFile() instead, which includes sudo support
 func (s SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) error {
 	// Read the private key file
 	// keyBytes, err := os.ReadFile(this.Key)
@@ -304,6 +306,7 @@ func (s SSHStruct) SecureUpload(localFilePath string, remoteFilePath string) err
 	return err
 }
 
+//Deprecated: use exe.DownloadFile() instead, which includes sudo support
 func (s SSHStruct) SecureDownloadAndSpin(remoteFilePath string, localFilePath string) error {
 	localFilePath = ExpandTilde(localFilePath)
 	return GoFuncAndSpin(s.SecureDownload, remoteFilePath, localFilePath)

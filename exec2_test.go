@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +113,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 		wantOutput     string
 		wantExitCode   int
 		wantErr        bool
+		sudo           bool
 	}{
 		{
 			name:          "Local command without stdout capture",
@@ -258,6 +260,34 @@ func TestCLIExecutor_Execute(t *testing.T) {
 			wantExitCode:   -1,
 			wantErr:        true,
 		},
+		{
+			name:           "remote sudo, ls private directory",
+			sshHost:        "localhost",
+			sshKey:         ExpandTilde("~/.ssh/homelab_rsa"),
+			sshUser:        os.Getenv("USER"),
+			command:        "ls -lah /root/",
+			sudo:           true,
+			directory:      "",
+			captureStdout:  false,
+			requestPayload: "",
+			wantOutput:     "",
+			wantExitCode:   0,
+			wantErr:        false,
+		},
+		{
+			name:           "remote sudo, findfiles private directory",
+			sshHost:        "localhost",
+			sshKey:         ExpandTilde("~/.ssh/homelab_rsa"),
+			sshUser:        os.Getenv("USER"),
+			command:        `find /root -iname "some*.rpm"`,
+			sudo:           true,
+			directory:      "",
+			captureStdout:  true,
+			requestPayload: "",
+			wantOutput:     "/root/somerpm.rpm\r\n/root/someotherrpm.rpm",
+			wantExitCode:   0,
+			wantErr:        false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -266,6 +296,7 @@ func TestCLIExecutor_Execute(t *testing.T) {
 				WithCommand(tt.command).
 				WithSubCommand(tt.subCommand).
 				WithRequestPayload(tt.requestPayload).
+				WithSudo(tt.sudo).
 				WithSSH(tt.sshHost, tt.sshKey, tt.sshUser).
 				WithSSHStruct(SSHStruct{
 					User: tt.sshUser,
@@ -1123,6 +1154,160 @@ func TestCLIExecutor_ProcAlive(t *testing.T) {
 			got := exe.ProcAlive(tt.pid)
 			if got != tt.want {
 				t.Errorf("ProcAlive() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCLIExecutor_UploadFile(t *testing.T) {
+	// prepare a temp local file for tests that need an existing file
+	tmpFile, err := os.CreateTemp("", "upload_test_*")
+	if err != nil {
+		t.Fatalf("unable to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	_, _ = tmpFile.WriteString("hello world")
+	tmpFile.Close()
+
+	var sshcfg SSHStruct
+	sshcfg.Host = "localhost"
+	sshcfg.User = os.Getenv("USER")
+	sshcfg.Key = ExpandTilde("~/.ssh/homelab_rsa")
+
+	tests := []struct {
+		name string // description of this test case
+		// Named input parameters for target function.
+		fromPath string
+		toPath   string
+		// optional SSH configuration to apply to the executor
+		useSSH  bool
+		sudo    bool
+		wantErr bool
+	}{
+		{
+			name:     "no ssh host provided",
+			fromPath: tmpFile.Name(),
+			toPath:   "/tmp/should_not_matter",
+			wantErr:  true,
+		},
+		{
+			name:     "local file missing",
+			fromPath: "/tmp/nonexistent_upload_file",
+			toPath:   "/tmp/remote_place",
+			useSSH:   true,
+			wantErr:  true,
+		},
+		{
+			name:     "with ssh struct (localhost) but no sudo (Should fail)",
+			fromPath: tmpFile.Name(),
+			toPath:   filepath.Join("/root", filepath.Base(tmpFile.Name())),
+			useSSH:   true,
+			sudo:     false,
+			wantErr:  true, // remote may be unreachable in CI; we expect an error
+		},
+		{
+			name:     "with ssh struct (localhost) with sudo, should succeed",
+			fromPath: tmpFile.Name(),
+			toPath:   filepath.Join("/root", filepath.Base(tmpFile.Name())),
+			useSSH:   true,
+			sudo:     true,
+			wantErr:  false, // remote may be unreachable in CI; we expect an error
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewCLIExecutor()
+			if tt.useSSH {
+				c.WithSSHStruct(sshcfg)
+			}
+			c.WithSudo(tt.sudo)
+			//c.WithSpinny(true)
+			//fmt.Printf("Testing UploadFile with fromPath=%s toPath=%s useSSH=%v sudo=%v\n", tt.fromPath, tt.toPath, tt.useSSH, tt.sudo)
+			gotErr := c.UploadFile(tt.fromPath, tt.toPath)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("UploadFile() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("UploadFile() succeeded unexpectedly")
+			}
+		})
+	}
+}
+
+
+func TestCLIExecutor_DownloadFile(t *testing.T) {
+	// prepare a temp local file for tests that need an existing file
+	
+
+	var sshcfg SSHStruct
+	sshcfg.Host = "localhost"
+	sshcfg.User = os.Getenv("USER")
+	sshcfg.Key = ExpandTilde("~/.ssh/homelab_rsa")
+
+	tests := []struct {
+		name string // description of this test case
+		// Named input parameters for target function.
+		fromPath string
+		toPath   string
+		// optional SSH configuration to apply to the executor
+		useSSH  bool
+		sudo    bool
+		wantErr bool
+	}{
+		{
+			name:     "no ssh host provided",
+			fromPath: "/etc/shadow",
+			toPath:   "/tmp/should_not_matter",
+			wantErr:  true,
+		},
+		{
+			name:     "remote file missing",
+			fromPath: "/tmp/nonexistent_download_file",
+			toPath:   "/tmp/nonexistent_download_file",
+			useSSH:   true,
+			wantErr:  true,
+		},
+		{
+			name:     "with ssh struct (localhost) but no sudo (Should fail)",
+			fromPath: "/etc/shadow",
+			toPath:   "/tmp/shadow_copy",
+			useSSH:   true,
+			sudo:     false,
+			wantErr:  true, // remote may be unreachable in CI; we expect an error
+		},
+		{
+			name:     "with ssh struct (localhost) with sudo, should succeed",
+			fromPath: "/etc/shadow",
+			toPath:   "/tmp/shadow_copy",
+			useSSH:   true,
+			sudo:     true,
+			wantErr:  false, 
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewCLIExecutor()
+			if tt.useSSH {
+				c.WithSSHStruct(sshcfg)
+			}
+			c.WithSudo(tt.sudo)
+			//c.WithSpinny(true)
+			// if c.FileExists(tt.fromPath) {
+			// 	fmt.Printf("Source file %s exists, proceeding with test\n", tt.fromPath)
+			// }
+			// fmt.Printf("Testing DownloadFile with fromPath=%s toPath=%s useSSH=%v sudo=%v\n", tt.fromPath, tt.toPath, tt.useSSH, tt.sudo)
+			gotErr := c.DownloadFile(tt.fromPath, tt.toPath)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("DownloadFile() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("DownloadFile() succeeded unexpectedly")
 			}
 		})
 	}
